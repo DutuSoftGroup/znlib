@@ -1,0 +1,53 @@
+object znProcess: TznProcess
+  Left = 308
+  Top = 239
+  BorderIcons = [biSystemMenu]
+  BorderStyle = bsNone
+  ClientHeight = 63
+  ClientWidth = 242
+  Color = clBtnFace
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -12
+  Font.Name = #23435#20307
+  Font.Style = []
+  FormStyle = fsStayOnTop
+  OldCreateOrder = False
+  OnDestroy = FormDestroy
+  PixelsPerInch = 96
+  TextHeight = 12
+  object Panel1: TPanel
+    Left = 0
+    Top = 0
+    Width = 242
+    Height = 63
+    Align = alClient
+    BevelInner = bvRaised
+    BevelOuter = bvLowered
+    Color = clMoneyGreen
+    TabOrder = 0
+    OnMouseDown = Panel1MouseDown
+    OnMouseMove = Panel1MouseMove
+    OnMouseUp = Panel1MouseUp
+    object Label1: TLabel
+      Left = 10
+      Top = 5
+      Width = 220
+      Height = 22
+      AutoSize = False
+      Layout = tlBottom
+      WordWrap = True
+      OnMouseDown = Panel1MouseDown
+      OnMouseMove = Panel1MouseMove
+      OnMouseUp = Panel1MouseUp
+    end
+    object Gauge1: TGauge
+      Left = 10
+      Top = 32
+      Width = 220
+      Height = 15
+      ForeColor = clBlue
+      Progress = 0
+    end
+  end
+end

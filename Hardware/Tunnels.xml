@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="gb2312"?>
+<!--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+节点: ports->item
+*.type: 表头类型
+*.conn: 链路(com,tcp)
+*.port: 通讯端口
+*.rate: 波特率
+*.databit: 数据位
+*.stopbit: 停止位
+*.paritybit: 校验位(None,Odd,Even,Mark,Space)
+*.paritycheck: 启用校验,Y为启用
+*.charbegin: 数据开始标记
+*.charend: 数据结束标记
+*.packlen: 表头数据包长
+*.splittag: 多段分隔符
+*.splitpos: 有效段索引,从1开始,0时不分段
+*.invalidbegin: 需截除的首长度
+*.invalidend: 需截除的尾长度
+*.datamirror: 数据头尾镜像(反向)
+*.dataenlarge: 数据放大倍数,用于吨-公斤互换
+*.hostip: 网络通讯时主机
+*.hostport: 网络通讯时端口
+*.minval: 地磅下限;enable为是否启用(y/n)
+*.maxval: 地磅上限;valid为超上线时取值;enable为是否启用(y/n)
+
+节点: cameras->item
+*.host: 摄像机IP
+*.port: 服务端口
+*.user: 登录名
+*.password: 登录密码
+*.picsize: 图片大小,(0.CIF;1.QCIF;2.D1)
+*.picquality:图片质量(0.最好;1.较好;2.一般)
+
+节点: tunnels->item
+*.port: 通讯端口,对应ports.item.id
+*.prober: 车辆检测器通道标识,对应TruckProber.xml.prober.tunnels.tunnel.id
+*.reader: 标签读卡器标识,对应Readers.item.id
+*.userinput: 手工输入,Y为允许
+*.factory: 所在工厂标识
+*.cardInterval: 两次读卡的间隔,单位秒.
+*.sampleNum: 读磅采样个数
+*.sampleFloat: 采样平均值和单值的浮动,单位公斤
+*.additional: 附加参数,Key=Value;Key=Value形式.
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-->
+<pounds>
+  <ports>
+	<item id="P1" name="一期1号磅">
+		<type>T800</type>
+        <conn>tcp</conn>
+		<port>com14</port>
+		<rate>2400</rate>
+		<databit>7</databit>
+		<stopbit>1</stopbit>
+		<paritybit>None</paritybit>
+		<paritycheck>N</paritycheck>
+		<charbegin>$20</charbegin>
+		<charend>$0D</charend>
+		<packlen>16</packlen>
+		<splittag>$20</splittag>
+		<splitpos>0</splitpos>
+		<invalidbegin>0</invalidbegin>
+		<invalidend>2</invalidend>
+		<datamirror>0</datamirror>
+		<dataenlarge>0.001</dataenlarge>
+        <hostip>127.0.0.1</hostip>
+        <hostport>8000</hostport>
+        <minval enable="n">80</minval>
+        <maxval enable="n" valid="80">80</maxval>
+	</item>
+  </ports>
+  <cameras>
+    <item id="C1" name="一期DVR">
+		<host>192.168.200.43</host>
+		<port>8000</port>
+		<user>admin</user>
+		<password>12345</password>
+		<picsize>0</picsize>
+		<picquality>1</picquality>
+    </item>
+  </cameras>
+  <tunnels>
+	<item id="B1" name="一期1号磅 - 出">
+		<port>P1</port>
+		<prober>T1</prober>
+		<reader>R1</reader>
+		<camera id="C1">1,2</camera>
+		<userinput>Y</userinput>
+		<factory>YXGL</factory>
+		<cardInterval>300</cardInterval>
+		<sampleNum>10</sampleNum>
+		<sampleFloat>20</sampleFloat>
+        <additional>voice=local</additional>
+	</item>
+  </tunnels>
+</pounds>

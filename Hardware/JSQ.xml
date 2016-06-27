@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="gb2312"?>
+<items>
+  <config>
+    <query>0</query>
+    <!--开启查询 1,开启;其它,关闭 -->
+    <count>1</count>
+    <!--开启计数 1,开启;其它,关闭 -->
+    <chain>1</chain>
+    <!--连锁计数,不连锁时只传递数据 0,开启;其它,关闭 -->
+  </config>
+  <item name="11111">
+    <param>
+      <ip>192.168.3.85</ip>
+      <port>8000</port>
+      <addr>1</addr>
+      <linenum>4</linenum>
+    </param>
+    <lines>
+      <line>
+        <id>ZT001</id>
+        <name>包装1道:一期北</name>
+        <tunnel>1</tunnel>
+        <delay>7</delay>
+        <group>d1</group>
+      </line>
+      <line>
+        <id>ZT002</id>
+        <name>包装2道:一期南</name>
+        <tunnel>2</tunnel>
+        <delay>7</delay>
+        <group>d1</group>
+      </line>
+      <line>
+        <id>ZT003</id>
+        <name>包装3道:二期北</name>
+        <tunnel>3</tunnel>
+        <delay>7</delay>
+      </line>
+      <line>
+        <id>ZT004</id>
+        <name>包装4道:二期南</name>
+        <tunnel>4</tunnel>
+        <delay>7</delay>
+      </line>
+    </lines>
+  </item>
+</items>
