@@ -49,6 +49,7 @@ type
     FObject   : string;                //对象标识
     FSleep    : Integer;               //对象间隔
     FText     : string;                //播发内容
+    FErrText  : string;                //错误内容
     FTimes    : Integer;               //重发次数
     FInterval : Integer;               //重发间隔
     FRepeat   : Integer;               //单次重复
@@ -332,7 +333,7 @@ end;
 procedure TNetVoiceManager.LoadConfig(const nFile: string);
 var i,nIdx: Integer;
     nXML: TNativeXml;
-    nRoot,nNode,nTmp: TXmlNode;
+    nRoot,nNode,nTmp,nENode: TXmlNode;
     
     nCard: PVoiceCardHost;
     nParam: PVoiceContentParam;
@@ -382,6 +383,11 @@ begin
 
             nParam.FRepeat   := NodeByName('repeat').ValueAsInteger;
             nParam.FReInterval := NodeByName('reinterval').ValueAsInteger;
+
+            nENode := FindNode('errtext');
+            if Assigned(nENode) then
+                 nParam.FErrText := nENode.ValueAsString
+            else nParam.FErrText := '';
           end;
         end;
       end else nCard.FContent := nil;
@@ -522,8 +528,8 @@ end;
 
 //Desc: 将发送缓冲数据合并到语音卡缓冲
 procedure TNetVoiceConnector.CombineBuffer;
-var nStr: string;
-    i,nIdx,nLen: Integer;
+var nStr, nTruck, nErr: string;
+    i,nIdx,nLen, nPos: Integer;
 
     nCard: PVoiceCardHost;
     nRes: PVoiceResource;
@@ -566,7 +572,16 @@ begin
       end;
 
       //------------------------------------------------------------------------
-      SplitStr(nTxt.FText, FListA, 0, #9, False);
+      nPos := Pos('ERR', nTxt.FText);
+      if nPos>0 then
+      begin
+        nErr := Copy(nTxt.FText, nPos, Length(nTxt.FText) - nPos + 1);
+        Delete(nTxt.FText, nPos, Length(nTxt.FText) - nPos + 1);
+      end;
+
+      //正确车牌信息
+      nTruck := nTxt.FText;
+      SplitStr(nTruck, FListA, 0, #9, False);
       //拆分: YA001 #9 YA002
 
       for i:=FListA.Count - 1 downto 0 do
@@ -577,7 +592,7 @@ begin
         //清理空行
       end;
 
-      if (FListA.Count > 1) or (nTxt.FText[1] = #9) then
+      if (FListA.Count > 1) or ((Length(nTruck) > 0) and (nTruck[1] = #9)) then
       begin
         nStr := '';
         nLen := FListA.Count - 1;
@@ -593,7 +608,41 @@ begin
         nStr := StringReplace(nParm.FText, nParm.FObject, nStr,
                                            [rfReplaceAll, rfIgnoreCase]);
         //text real content
-      end else nStr := nTxt.FText;
+      end else nStr := nTruck;
+
+      //错误车牌信息
+      SplitStr(nErr, FListA, 0, 'ERR', False);
+      //拆分: YA001 ERR YA002
+
+      for i:=FListA.Count - 1 downto 0 do
+      begin
+        FListA[i] := Trim(FListA[i]);
+        if FListA[i] = '' then
+          FListA.Delete(i);
+        //清理空行
+      end;
+
+      if (FListA.Count > 1) or ((Length(nErr) > 0) and (Copy(nErr, 1, 3) = 'ERR')) then
+      begin
+        nErr := '';
+        nLen := FListA.Count - 1;
+
+        for i:=0 to nLen do
+        if Trim(FListA[i]) <> '' then
+        begin
+          if nIdx = nLen then
+               nErr := nErr + FListA[i]
+          else nErr := nErr + FListA[i] + Format('[p%d]', [nParm.FSleep]);
+        end;
+
+        nErr := StringReplace(nParm.FErrText, nParm.FObject, nErr,
+                                           [rfReplaceAll, rfIgnoreCase]);
+        //text real content
+      end;
+
+      nStr := nStr + nErr;
+      if Length(nStr) < 1 then Exit;
+      //拼接语音记录
 
       for i:=nCard.FResource.Count - 1 downto 0 do
       begin
@@ -603,12 +652,12 @@ begin
         //resource replace
       end;
 
+
       for i:=2 to nParm.FRepeat do
         nStr := nStr + Format('[p%d]', [nParm.FReInterval]) + nStr;
       //xxxxx
 
       //------------------------------------------------------------------------
-
       with nCard.FVoiceData do
       begin
         FHead := cVoice_CMD_Head;
@@ -623,6 +672,8 @@ begin
         nCard.FVoiceLast := 0;
         nCard.FVoiceTime := 0;
       end;
+
+      WriteLog(nStr);
     end;
 
     ClearDataList(FBuffer);
