@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="gb2312"?>
+<!--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+节点: readers.reader
+*.enable: N,关闭;其它开启.
+*.id,name: 节点标识
+*.port: 串口索引(0-3)
+*.baud: 波特率
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-->
+<MH_RF35LT>
+  <readers>
+    <reader id="0101" name="读卡器">
+      <enable>Y</enable>
+      <port>2</port>
+      <baud>115200</baud>
+    </reader>
+    <reader id="0102" name="读写器">
+      <enable>Y</enable>
+      <port>2</port>
+      <baud>115200</baud>
+    </reader>
+  </readers>
+</MH_RF35LT>

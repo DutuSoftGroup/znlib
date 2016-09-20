@@ -50,6 +50,9 @@ type
     FKeepPeer: Boolean;        //保持模式
     FKeepLast: Int64;          //上次活动
     FClient : TIdTCPClient;    //通信链路
+
+    FCardLength: Integer;      //卡号长度
+    FCardPrefix: TStrings;     //前缀控制
   end;
 
   THYReaderThreadType = (ttAll, ttActive);
@@ -78,7 +81,7 @@ type
     //扫描可用
     function ReadCard(const nReader: PHYReaderItem): Boolean;
     //读卡片
-    function IsCardValid(const nCard: string): Boolean;
+    function IsCardValid(const nCard: string; const nReader: PHYReaderItem): Boolean;
     //校验卡号
     procedure DoReaderCommand;
     //处理读卡器指定
@@ -106,9 +109,6 @@ type
     //读头索引
     FReaders: TList;
     //读头列表
-    FCardLength: Integer;
-    FCardPrefix: TStrings;
-    //卡号标识
     FBuffData: TList;
     //临时缓冲
     FSyncLock: TCriticalSection;
@@ -164,10 +164,7 @@ begin
   for nIdx:=Low(FThreads) to High(FThreads) do
     FThreads[nIdx] := nil;
   //xxxxx
-
-  FCardLength := 0;
-  FCardPrefix := TStringList.Create;
-  
+    
   FReaders := TList.Create;
   FBuffData := TList.Create;
   FSyncLock := TCriticalSection.Create;
@@ -180,8 +177,6 @@ begin
   ClearBuffer(FBuffData);
   
   FBuffData.Free;
-  FCardPrefix.Free;
-
   FSyncLock.Free;
   inherited;
 end;
@@ -207,6 +202,9 @@ begin
     nItem := FReaders[nIdx];
     nItem.FClient.Free;
     nItem.FClient := nil;
+
+    nItem.FCardPrefix.Free;
+    nItem.FCardPrefix := nil;
     
     Dispose(nItem);
     FReaders.Delete(nIdx);
@@ -299,9 +297,9 @@ begin
       if nBase.FCmd <> tCmd_Reader_SetReLay then Exit;
 
       nPtr := PRFIDSetRelay(FBuffData[nIdx]);   
-      if (CompareText(nReader, nPtr.FReaderID) = 0) and
+      if (CompareText(nReader, nPtr.FReaderID) = 0) and nActive and
          (nPtr.FBase.FData = nData) then Exit;
-      //同一个读卡器上相同指令保存一次   
+      //同一个读卡器上吸合指令保存一次   
     end;
 
     New(nPtr);
@@ -345,16 +343,6 @@ begin
       if Assigned(nNode) then
         Self.FEnable := nNode.ValueAsString <> 'N';
       //xxxxx
-
-      nNode := nRoot.FindNode('cardlen');
-      if Assigned(nNode) then
-           FCardLength := nNode.ValueAsInteger
-      else FCardLength := 0;
-
-      nNode := nRoot.FindNode('cardprefix');
-      if Assigned(nNode) then
-           SplitStr(UpperCase(nNode.ValueAsString), FCardPrefix, 0, ',')
-      else FCardPrefix.Clear;
 
       nNode := nRoot.FindNode('thread');
       if Assigned(nNode) then
@@ -439,7 +427,18 @@ begin
           Port := FPort;
           ReadTimeout := 3 * 1000;
           ConnectTimeout := 3 * 1000;   
-        end;  
+        end;
+
+        nTmp := FindNode('cardlen');
+        if Assigned(nTmp) then
+             FCardLength := nTmp.ValueAsInteger
+        else FCardLength := 0;
+
+        FCardPrefix := TStringList.Create;
+        nTmp := FindNode('cardprefix');
+        if Assigned(nTmp) then
+             SplitStr(UpperCase(nTmp.ValueAsString), FCardPrefix, 0, ',')
+        else FCardPrefix.Clear;
       end;
     end;
   finally
@@ -763,21 +762,23 @@ end;
 //Date: 2015-12-07
 //Parm: 卡号
 //Desc: 验证nCard是否有效
-function THYRFIDReader.IsCardValid(const nCard: string): Boolean;
+function THYRFIDReader.IsCardValid(const nCard: string;
+  const nReader: PHYReaderItem): Boolean;
 var nIdx: Integer;
 begin
   with FOwner do
   begin
     Result := False;
     nIdx := Length(Trim(nCard));
-    if (nIdx < 1) or ((FCardLength > 0) and (nIdx < FCardLength)) then Exit;
+    if (nIdx < 1) or (
+       (nReader.FCardLength > 0) and (nIdx < nReader.FCardLength)) then Exit;
     //leng verify
 
-    Result := FCardPrefix.Count = 0;
+    Result := nReader.FCardPrefix.Count = 0;
     if Result then Exit;
 
-    for nIdx:=FCardPrefix.Count - 1 downto 0 do
-     if Pos(FCardPrefix[nIdx], nCard) = 1 then
+    for nIdx:=nReader.FCardPrefix.Count - 1 downto 0 do
+     if Pos(nReader.FCardPrefix[nIdx], nCard) = 1 then
      begin
        Result := True;
        Exit;
@@ -794,6 +795,9 @@ begin
   if not nReader.FClient.Connected then
     nReader.FClient.Connect;
   Result := False;
+
+  FOwner.ActiveRelay(nReader.FID, False);
+  //发送一次释放继电器指令
 
   with FSendItem do
   begin
@@ -832,7 +836,7 @@ begin
     nEPC := HexStr(Copy(FRecvItem.FData, nStart+2, nLen));
     nStart := nStart + nLen + 1;
 
-    if IsCardValid(nEPC) then
+    if IsCardValid(nEPC, nReader) then
       FEPCList.Add(nEPC);
     //xxxxx
   end;

@@ -161,6 +161,8 @@ type
     function GetCamera(const nID: string): PPTCameraItem;
     function GetTunnel(const nID: string): PPTTunnelItem;
     //检索数据
+    function WriteData(const nTunnel, nData: string): Boolean;
+    //发送指令
     property Tunnels: TList read FTunnels;
     //属性相关
   end;
@@ -548,45 +550,50 @@ begin
       FConnector.WakupMe; //启动链接器
                                   
       nPT.FPort.FClientActive := True;
-      Exit;
-    end; //套接字链路
+    end else //套接字链路
 
-    if not Assigned(nPT.FPort.FCOMPort) then
+    if nPT.FPort.FConn = ctCOM then
     begin
-      nPT.FPort.FCOMPort := TComPort.Create(nil);
-      with nPT.FPort.FCOMPort do
+      if not Assigned(nPT.FPort.FCOMPort) then
       begin
-        Tag := FPorts.IndexOf(nPT.FPort);
-        OnRxChar := OnComData;
-
-        with Timeouts do
+        nPT.FPort.FCOMPort := TComPort.Create(nil);
+        with nPT.FPort.FCOMPort do
         begin
-          ReadTotalConstant := 100;
-          ReadTotalMultiplier := 10;
-        end;
+          Tag := FPorts.IndexOf(nPT.FPort);
+          OnRxChar := OnComData;
 
-        with Parity do
+          with Timeouts do
+          begin
+            ReadTotalConstant := 100;
+            ReadTotalMultiplier := 10;
+          end;
+
+          with Parity do
+          begin
+            Bits := nPT.FPort.FParitybit;
+            Check := nPT.FPort.FParityCheck;
+          end;
+
+          Port := nPT.FPort.FPort;
+          BaudRate := nPT.FPort.FRate;
+          DataBits := nPT.FPort.FDatabit;
+          StopBits := nPT.FPort.FStopbit;
+        end;
+      end;
+
+      try
+        if nOpenPort then
+          nPT.FPort.FCOMPort.Open;
+        //开启端口
+      except
+        on E: Exception do
         begin
-          Bits := nPT.FPort.FParitybit;
-          Check := nPT.FPort.FParityCheck;
+          WriteLog(E.Message);
         end;
-
-        Port := nPT.FPort.FPort;
-        BaudRate := nPT.FPort.FRate;
-        DataBits := nPT.FPort.FDatabit;
-        StopBits := nPT.FPort.FStopbit;
       end;
-    end;
 
-    try
-      if nOpenPort then
-        nPT.FPort.FCOMPort.Open;
-      //开启端口
-    except
-      on E: Exception do
-      begin
-        WriteLog(E.Message);
-      end;
+      nPT.FPort.FClientActive := True;
+      //xxxxx
     end;
 
     Result := True;
@@ -750,6 +757,49 @@ begin
 
     Exit;
     //end loop
+  end;
+end;
+
+function TPoundTunnelManager.WriteData(const nTunnel, nData: string): Boolean;
+var nPT: PPTTunnelItem;
+begin
+  Result := False;
+  //xxxxx
+
+  FSyncLock.Enter;
+  try
+    nPT := GetTunnel(nTunnel);
+    if not Assigned(nPT) then Exit;
+
+    if nPT.FPort.FConn = ctTCP then
+    begin
+      if not Assigned(nPT.FPort.FClient) then Exit;
+      //无对象
+
+      if not nPT.FPort.FClient.Connected then Exit;
+      //未连接
+
+      if not nPT.FPort.FClientActive then Exit;
+      //未启用
+
+      nPT.FPort.FClient.Socket.WriteLn(nData);
+    end else //套接字链路
+
+    if nPT.FPort.FConn = ctCom then
+
+    begin
+      if not Assigned(nPT.FPort.FCOMPort) then Exit;
+      //无串口对象
+
+      if not nPT.FPort.FCOMPort.Connected then Exit;
+      //未打开
+
+      nPT.FPort.FCOMPort.WriteStr(nData);
+    end; //串口链路
+
+    Result := True;
+  finally
+    FSyncLock.Leave;
   end;
 end;
 

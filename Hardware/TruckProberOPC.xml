@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="gb2312"?>
+<!--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+节点: prober
+*.enable: N为禁用;其它启用
+*.signal_in: 输入信号状态
+*.signal_out: 输出信号状态
+*.server: OPC服务器名称 
+
+节点: prober->folders->folder
+*.id:数字(0-9)字母(a-z)自由编号,但不允许重复
+*.name: 与OPC服务器上folder和item保持一致
+
+节点: prober->tunnels->tunnel
+*.enable: N为禁用;其它启用
+*.in: 输入通道编号
+*.out: 输出通道编号
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-->
+<probers>
+  <prober id="N1" name="Main_OPC_Server">
+    <enable>Y</enable>
+    <signal_in on="1" off="0" />
+    <signal_out on="1" off="0" />
+    <server>S7200SMART.OPCServer</server>
+    <!-- ----------split line---------- -->
+    <folders>
+       <folder id="12" name="12">
+         <item id="121" name="红绿灯控制1" />
+         <item id="122" name="红绿灯控制2" />
+         <item id="123" name="红外反馈1_1" />
+         <item id="124" name="红外反馈1_2" />
+         <item id="125" name="红外反馈2_1" />
+         <item id="126" name="红外反馈2_2" />
+       </folder>
+       <folder id="34" name="34">
+         <item id="341" name="红绿灯控制3" />
+         <item id="342" name="红绿灯控制4" />
+         <item id="343" name="红外反馈3_1" />
+         <item id="344" name="红外反馈3_2" />
+         <item id="345" name="红外反馈4_1" />
+         <item id="346" name="红外反馈4_2" />
+       </folder>
+    </folders>
+    <!-- ----------split line---------- -->
+    <tunnels>
+      <tunnel id="T1" name="1号进">
+        <enable>Y</enable>
+        <in>123,124,125,126</in>
+        <out>121,122</out>
+      </tunnel>
+      <tunnel id="T2" name="1号出">
+        <enable>Y</enable>
+        <in>343,344</in>
+        <out>341,342</out>
+      </tunnel>
+    </tunnels>
+  </prober>
+</probers>

@@ -421,7 +421,7 @@ begin
 
             if nPCard.FHost.FEEnable and (nPCard.FHost.FRealLabel <> '') and //使用电子签
                (not nPCard.FHost.FETimeOut) and                              //业务未超时
-               (GetTickCount - nPCard.FHost.FELast > 2 * 60 * 1000) then
+               (GetTickCount - nPCard.FHost.FELast > 5 * 60 * 1000) then
             begin
               nPCard.FEvent := False;
               nPCard.FHost.FETimeOut := True;
