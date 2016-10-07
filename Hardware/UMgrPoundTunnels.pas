@@ -19,6 +19,7 @@ const
   cPTWait_Long  = 2 * 1000; //网络通讯时刷新频度
 
 type
+  TOnOutWeightEvent  = procedure of object;
   TOnTunnelDataEvent = procedure (const nValue: Double) of object;
   //事件定义
 
@@ -28,7 +29,7 @@ type
   PPTPortItem = ^TPTPortItem;
   PPTCameraItem = ^TPTCameraItem;
   PPTTunnelItem = ^TPTTunnelItem;
-  
+
   TPTTunnelItem = record
     FID: string;                     //标识
     FName: string;                   //名称
@@ -46,8 +47,9 @@ type
 
     FCamera: PPTCameraItem;          //摄像机
     FCameraTunnels: array[0..cPTMaxCameraTunnel-1] of Byte;
-                                     //摄像通道                                     
+                                     //摄像通道
     FOnData: TOnTunnelDataEvent;     //接收事件
+    FOnOutWeight: TOnOutWeightEvent; //超载事件
     FOldEventTunnel: PPTTunnelItem;  //原接收通道
   end;
 
@@ -88,6 +90,16 @@ type
     FMaxValue: Double;               //磅站上限
     FMaxValid: Double;               //上限取值
     FMinValue: Double;               //磅站下限
+
+    FSignValid: Boolean;             //有效
+    FSignValue: string;
+    FSignPos: Integer;               //符号位置
+    FSignSubPos: Integer;            //符号子位置
+
+    FOverLoadValid: Boolean;         //有效
+    FOverLoadValue: string;          //超载标记
+    FOverLoadPos: Integer;           //超载标识位
+    FOverLoadSubPos: Integer;        //超载标识子位置
 
     FHostIP: string;
     FHostPort: Integer;              //网络链路
@@ -163,6 +175,8 @@ type
     //检索数据
     function WriteData(const nTunnel, nData: string): Boolean;
     //发送指令
+    procedure SetOutWeightEvent(const nID:string; nEvent: TOnOutWeightEvent);
+    //设置超载触发
     property Tunnels: TList read FTunnels;
     //属性相关
   end;
@@ -194,7 +208,7 @@ begin
   if Assigned(FConnector) then
     FConnector.StopMe;
   //xxxxx
-  
+
   ClearList(True);
   FStrList.Free;
   FSyncLock.Free;
@@ -366,10 +380,28 @@ begin
       nTmp := FindNode('hostport');
       if Assigned(nTmp) then nPort.FHostPort := nTmp.ValueAsInteger;
 
+      nTmp := FindNode('signflag');
+      if Assigned(nTmp) then
+      begin
+        nPort.FSignValid := nTmp.ValueAsString = 'Y';
+        nPort.FSignValue := nTmp.AttributeByName['value'];
+        nPort.FSignPos := StrToIntDef(nTmp.AttributeByName['pos'], 0);
+        nPort.FSignSubPos := StrToIntDef(nTmp.AttributeByName['subpos'], 0);
+      end else nPort.FSignValid := False;
+
+      nTmp := FindNode('overload');
+      if Assigned(nTmp) then
+      begin
+        nPort.FOverLoadValid := nTmp.ValueAsString = 'Y';
+        nPort.FOverLoadValue := nTmp.AttributeByName['value'];
+        nPort.FOverLoadPos := StrToIntDef(nTmp.AttributeByName['pos'], 0);
+        nPort.FOverLoadSubPos := StrToIntDef(nTmp.AttributeByName['subpos'], 0);
+      end else nPort.FOverLoadValid := False;
+
       nPort.FClient := nil;
       nPort.FClientActive := False;
       //默认无链路
-      
+
       nPort.FCOMPort := nil;
       //默认不启用
       nPort.FEventTunnel := nil;
@@ -684,11 +716,20 @@ begin
   end;
 end;
 
+function Byte2BitString(nByte: Byte): string;
+var nIdx: Integer;
+begin
+  Result := '';
+  for nIdx := 7 downto 0 do
+    Result := Result + IntToStr((nByte shr nIdx) and $01);
+end;
+
 //Date: 2014-06-12
 //Parm: 端口
 //Desc: 解析nPort上的称重数据
 function TPoundTunnelManager.ParseWeight(const nPort: PPTPortItem): Boolean;
 var nIdx,nPos,nEnd: Integer;
+    nFlag, nTmp: string;
     nVal: Double;
 begin
   Result := False;
@@ -731,6 +772,39 @@ begin
       //有效数据
     end;
 
+    if nPort.FOverLoadValid then
+    begin
+      if nPort.FOverLoadSubPos > 0 then
+      begin
+        nTmp := Byte2BitString(Ord(nPort.FCOMData[nPort.FOverLoadPos]))[nPort.FOverLoadSubPos];
+      end else nTmp := nPort.FCOMData[nPort.FOverLoadPos];
+
+      if nTmp = nPort.FOverLoadValue then
+      begin
+        if Assigned(nPort.FEventTunnel.FOnOutWeight) then
+          nPort.FEventTunnel.FOnOutWeight;
+
+        Exit;
+      end;  
+    end;  
+
+    nFlag := '';
+    if nPort.FSignValid and (nPort.FSignPos > 0) then
+    begin
+      if nPort.FSignSubPos > 0 then
+      begin
+        nTmp := Byte2BitString(Ord(nPort.FCOMData[nPort.FSignPos]))[nPort.FSignSubPos];
+      end else nTmp := nPort.FCOMData[nPort.FSignPos];
+
+      if nTmp = nPort.FSignValue then
+        nFlag := '-';
+    end;
+    //数据符号位
+
+    {$IFDEF DEBUG}
+    WriteLog(nPort.FCOMData + '==========' + nFlag + '======' + nPort.FSignValue);
+    {$ENDIF}
+
     if nPort.FInvalidBegin > 0 then
       System.Delete(nPort.FCOMData, 1, nPort.FInvalidBegin);
     //首部无效数据
@@ -744,7 +818,7 @@ begin
       nPort.FCOMData := MirrorStr(nPort.FCOMData);
     //数据反转
 
-    nPort.FCOMData := Trim(nPort.FCOMData);
+    nPort.FCOMData := nFlag + Trim(nPort.FCOMData);
     Result := IsNumber(nPort.FCOMData, False);
 
     if Result and (nPort.FMaxValue > 0) then
@@ -798,6 +872,21 @@ begin
     end; //串口链路
 
     Result := True;
+  finally
+    FSyncLock.Leave;
+  end;
+end;
+
+procedure TPoundTunnelManager.SetOutWeightEvent(const nID: string;
+  nEvent: TOnOutWeightEvent);
+var nPT: PPTTunnelItem;
+begin
+  FSyncLock.Enter;
+  try
+    nPT := GetTunnel(nID);
+    if not Assigned(nPT) then Exit;
+
+    nPT.FOnOutWeight := nEvent;
   finally
     FSyncLock.Leave;
   end;

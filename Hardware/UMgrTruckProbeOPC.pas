@@ -8,9 +8,9 @@ unit UMgrTruckProbeOPC;
 interface
 
 uses
-  Windows, Classes, SysUtils, ActiveX, ExtCtrls, SyncObjs, dOPCIntf, dOPCComn,
-  dOPCCom, dOPCDA, dOPC, NativeXml, UWaitItem, UMemDataPool, USysLoger,
-  ULibFun;
+  Windows, Classes, SysUtils, ActiveX, Forms, ExtCtrls, SyncObjs, dOPCIntf,
+  dOPCComn, dOPCCom, dOPCDA, dOPC, NativeXml, UWaitItem, UMemDataPool,
+  USysLoger, ULibFun;
 
 type
   POPCProberHost = ^TOPCProberHost;
@@ -43,12 +43,13 @@ type
 
   POPCFolder = ^TOPCFolder;
   TOPCFolder = record                   
-    FID     : string;                   //节点编号
-    FName   : string;                   //OPC目录名称
-    FFolder : TdOPCBrowseItem;          //OPC目录对象
+    FID       : string;                 //节点编号
+    FName     : string;                 //OPC目录名称
+    FFolder   : TdOPCBrowseItem;        //OPC目录对象
 
-    FHost   : POPCProberHost;           //所在主机
-    FItems  : TList;                    //目录下项目
+    FHost     : POPCProberHost;         //所在主机
+    FItems    : TList;                  //目录下项目
+    FLastRead : Int64;                  //上次读取
   end;
 
   POPCItem = ^TOPCItem;
@@ -81,6 +82,8 @@ type
   private
     FOwner: TProberOPCManager;
     //拥有者
+    FItemList: TdOPCItemList;
+    //项目列表
     FWaiter: TWaitObject;
     //等待对象
   protected
@@ -99,9 +102,12 @@ type
     //检索项目
     function ConnectOPCServer(var nErr: string;
       const nHost: POPCProberHost = nil): Boolean;
-    procedure DisconnectServer(const nHost: POPCProberHost = nil);
+    procedure DisconnectServer(const nHost: POPCProberHost = nil;
+      const nFreeSrv: Boolean = False);
     procedure ReConnectOPCServer(const nHost: string);
     //连接服务
+    procedure SyncReadGroupData(const nFolder: POPCFolder);
+    //同步读取
     function TunnelOC(const nTunnel: string; nOC: Boolean): string;
     function IsTunnelOK(const nTunnel: string): Boolean;
     //业务相关
@@ -160,6 +166,8 @@ type
   end;
 
 var
+  gProberOPCMessageRead: Boolean = True;
+  //使用消息队列读取数据,关闭时线程同步
   gProberOPCManager: TProberOPCManager = nil;
   //全局使用
   
@@ -486,6 +494,7 @@ begin
           FFolder := nil;
           FHost  := nHost;
           FItems := nil;
+          FLastRead := 0;
 
           nTmp := FindNode('item');
           if not Assigned(nTmp) then Continue;
@@ -542,6 +551,8 @@ end;
 function TProberOPCManager.NewServiceData(const nInterval: Integer): POPCServiceItem;
 begin
   Result := gMemDataManager.LockData(FIDServiceData);
+  FServiceDataList.Add(Result);
+  
   with Result^ do
   begin
     FEnable := True;
@@ -576,8 +587,6 @@ begin
     end;
 
     nItem := NewServiceData(10 * 1000); //10s
-    FServiceDataList.Add(nItem);
-
     nItem.FAction := saConnSrv;
     FService.Wakeup;
   finally
@@ -612,7 +621,6 @@ begin
   try
     if not Assigned(FService) then Exit;
     nItem := NewServiceData(5 * 1000); //5s
-    FServiceDataList.Add(nItem);
 
     nItem.FAction := saDisconn;
     FService.Wakeup;
@@ -642,14 +650,11 @@ begin
     end;
     
     nItem := NewServiceData(10 * 1000); //10s
-    FServiceDataList.Add(nItem);
-
-    nItem.FAction := saTunnelOC;
     nItem.FDataStr := nTunnel;
     nItem.FDataBool := nOC;
 
+    nItem.FAction := saTunnelOC;
     FService.Wakeup;
-    //run at once
   finally
     FSyncLock.Leave;
   end;
@@ -696,10 +701,9 @@ begin
     end;
     
     nItem := NewServiceData(10 * 1000); //10s
-    FServiceDataList.Add(nItem);
+    nItem.FDataStr := nTunnel;
 
     nItem.FAction := saTunnelOK;
-    nItem.FDataStr := nTunnel;
     FService.Wakeup;
   finally
     FSyncLock.Leave;
@@ -723,12 +727,15 @@ begin
   FreeOnTerminate := False;
 
   FOwner := AOwner;
+  FItemList := TdOPCItemList.Create;
+  
   FWaiter := TWaitObject.Create;
   FWaiter.Interval := 1000;
 end;
 
 destructor TProberOPCService.Destroy;
 begin
+  FItemList.Free;
   FWaiter.Free;
   inherited;
 end;
@@ -1049,8 +1056,10 @@ begin
 end;
 
 //Date: 2016-09-06
+//Parm: 服务主机;释放对象
 //Desc: 断开服务器
-procedure TProberOPCService.DisconnectServer(const nHost: POPCProberHost);
+procedure TProberOPCService.DisconnectServer(const nHost: POPCProberHost;
+  const nFreeSrv: Boolean);
 var i,j,nIdx: Integer;
     nF: POPCFolder;
     nI: POPCItem;
@@ -1080,6 +1089,9 @@ begin
     end;
 
     nPHost.FServerObj.Active := False;
+    if nFreeSrv then
+      FreeAndNil(nPHost.FServerObj);
+    //xxxxx
   end;
 end;
 
@@ -1225,15 +1237,9 @@ begin
       nFolder := nF.FID;
     //xxxxx
 
-    if not nI.FGItem.IsActive then
-    begin
-      nStr := '通道[ %s ]输入点[ %s ]未激活.';
-      WriteLog(Format(nStr, [nTunnel, nT.FIn[nIdx]]));
-      Exit;
-    end;
-
-    nStr := '通道最后更新时间: ' + DateTime2Str(nI.FGItem.TimeStamp);
-    WriteLog(nStr);
+    if not gProberOPCMessageRead then
+      SyncReadGroupData(nF);
+    //read data
 
     nStr := nI.FGItem.ValueStr;
     //get data
@@ -1273,40 +1279,65 @@ begin
   Result := True;
 end;
 
+//Date: 2016-09-22
+//Parm: 目录
+//Desc: 读取nFolder下项目的数据
+procedure TProberOPCService.SyncReadGroupData(const nFolder: POPCFolder);
+var nIdx: Integer;
+    nG: TdOPCGroup;
+begin
+  nG := nFolder.FHost.FServerObj.OPCGroups.GetOPCGroup(nFolder.FID);
+  if GetTickCount - nFolder.FLastRead > nG.UpdateRate then
+  begin
+    nFolder.FLastRead := GetTickCount;
+    FItemList.Clear;
+
+    for nIdx:=0 to nG.OPCItems.Count - 1 do
+      FItemList.Add(nG.OPCItems[nIdx]);
+    nG.SyncRead(FItemList);
+  end;
+end;
+
 //------------------------------------------------------------------------------
 //Date: 2016-09-13
 //Desc: 线程动作
 procedure TProberOPCService.Execute;
 begin
-  CoInitialize(nil);
-  //thread in com
-
-  dOPCMULTITHREADED := True;
-  //multi thread flag
-
-  while not Terminated do
+  dOPCCoInitialize;
   try
-    FWaiter.EnterWait;
-    if Terminated then Break;
+    dOPCMULTITHREADED := True;
+    //multi thread flag
 
-    with FOwner do
+    while not Terminated do
     try
-      FSyncLock.Enter;
-      DoExecute();
-    finally
-      ClearServiceDataList(False, soThread);
-      FSyncLock.Leave;
-    end;
-  except
-    on E: Exception do
-    begin
-      WriteLog(Format('OPC-Service Error: %s.%s', [E.ClassName, E.Message]));
-      //log any error
-    end;
-  end;
+      FWaiter.EnterWait;
+      if Terminated then Break;
 
-  CoUninitialize;
-  //dec com counter
+      if gProberOPCMessageRead then
+        Application.ProcessMessages;
+      //read data use message 
+
+      with FOwner do
+      try
+        FSyncLock.Enter;
+        DoExecute();
+      finally
+        ClearServiceDataList(False, soThread);
+        FSyncLock.Leave;
+      end;
+    except
+      on E: Exception do
+      begin
+        WriteLog(Format('OPC-Service Error: %s.%s', [E.ClassName, E.Message]));
+        //log any error
+      end;
+    end;
+
+    DisconnectServer(nil, True);
+    //close and free all server
+  finally
+    dOPCCoUninitialize;
+  end;
 end;
 
 //Date: 2016-09-13

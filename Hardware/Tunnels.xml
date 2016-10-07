@@ -46,7 +46,7 @@
   <ports>
 	<item id="P1" name="Ò»ÆÚ1ºÅ°õ">
 		<type>T800</type>
-        <conn>tcp</conn>
+		<conn>tcp</conn>
 		<port>com14</port>
 		<rate>2400</rate>
 		<databit>7</databit>
@@ -62,10 +62,12 @@
 		<invalidend>2</invalidend>
 		<datamirror>0</datamirror>
 		<dataenlarge>0.001</dataenlarge>
-        <hostip>127.0.0.1</hostip>
-        <hostport>8000</hostport>
-        <minval enable="n">80</minval>
-        <maxval enable="n" valid="80">80</maxval>
+		<hostip>127.0.0.1</hostip>
+		<hostport>8000</hostport>
+		<minval enable="n">80</minval>
+		<maxval enable="n" valid="80">80</maxval>
+		<signflag pos="2" subpos="2" value="1">N</signflag>
+		<overload pos="2" subpos="3" value="1">N</overload>
 	</item>
   </ports>
   <cameras>
