@@ -399,7 +399,10 @@ begin
         for nIdx:=FCards.Count - 1 downto 0 do
         begin
           nPCard := FCards[nIdx];
-          if nPCard.FOldOne then
+          if nPCard.FOldOne or                                                  //散装超时
+             (Assigned(nPCard.FHost) and (nPCard.FHost.FType = rtOnce) and
+              nPCard.FEvent and (GetTickCount - nPCard.FLast > FKeepTime))      //袋装已触发事件
+          then
           begin
             Dispose(nPCard);
             nPCard := nil;
@@ -457,7 +460,8 @@ begin
       end;
 
       if nCard.FOldOne or
-         (Assigned(nPCard.FHost) and nPCard.FHost.FETimeOut) then
+         (Assigned(nPCard.FHost) and nPCard.FHost.FEEnable and
+          nPCard.FHost.FETimeOut) then
       begin
         if Assigned(FCardOut) then FCardOut(nHost, nCard);
       end else
@@ -563,6 +567,10 @@ begin
       nPCard.FEvent := False;
       nPCard.FInTime := GetTickCount;
     end;
+
+    if Assigned(nPCard.FHost) and (nPCard.FHost.FType = rtOnce) then
+      WriteLog('GetACard Host :[ ' + nPCard.FHost.FIP + ' ] ::: ' + nPCard.FCard +
+      ' ::: ' + BoolToStr(nPCard.FEvent, True)+ ' :::End');
 
     nPCard.FOldOne := False;
     nPCard.FLast := GetTickCount;

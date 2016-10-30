@@ -18,7 +18,7 @@ const
   cMultiJS_DaiNum          = 5;         //袋数长度
   cMultiJS_Delay           = 9;         //最大延迟
   cMultiJS_Tunnel          = 10;        //最大道数
-  cMultiJS_FreshInterval   = 1200;      //刷新频率
+  cMultiJS_FreshInterval   = 1500;      //刷新频率
   cMultiJS_SaveInterval    = 20 * 1000; //保存频率
 
   cFrame_Control           = $05;       //控制帧
@@ -737,7 +737,7 @@ begin
     if (not FEnableChain) or nDelJS then
     begin
       DelJS(nTunnel, nPH.FReader.FBuffer);
-      DelJS(nTunnel, nPH.FReader.FBuffer);
+      //DelJS(nTunnel, nPH.FReader.FBuffer);
       //停止计数
     end;
 
