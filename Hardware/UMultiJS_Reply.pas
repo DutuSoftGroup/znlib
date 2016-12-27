@@ -19,7 +19,7 @@ const
   cMultiJS_Truck           = 8;         //车牌长度
   cMultiJS_DaiNum          = 5;         //袋数长度
   cMultiJS_Delay           = 9;         //最大延迟
-  cMultiJS_Tunnel          = 8;        //最大道数
+  cMultiJS_Tunnel          = 8;        	//最大道数
   cMultiJS_CmdInterval     = 20;        //命令间隔
   cMultiJS_FreshInterval   = 1200;      //刷新频率
   cMultiJS_SaveInterval    = 20 * 1000; //保存频率
@@ -154,7 +154,7 @@ type
     procedure ClearBuffer(const nList: TList; const nFree: Boolean = False);
     //清空缓冲
     procedure DeleteMultiJSDataItem(const nData: PMultiJSDataItem;
-              nList: TList);
+              nList: TList; const nLock: Boolean = True);
     //删除指令          
     procedure DeleteFromBuffer(nAddr: Byte; nList: TList);
     //删除指令
@@ -329,15 +329,15 @@ begin
   begin
     nData := nList[nIdx];
     if nData.FTunnel.FTunnel = nAddr then
-      DeleteMultiJSDataItem(nData, nList);
+      DeleteMultiJSDataItem(nData, nList, False);
   end;
 end;
 
 procedure TMultJSItem.DeleteMultiJSDataItem(const nData: PMultiJSDataItem;
-  nList: TList);
+  nList: TList; const nLock: Boolean);
 var nIdx: Integer;
 begin
-  FOwner.FSyncLock.Enter;
+  if nLock then FOwner.FSyncLock.Enter;
   try
     gMemDataManager.UnLockData(nData);
     nIdx := nList.IndexOf(nData);
@@ -346,7 +346,7 @@ begin
       nList.Delete(nIdx);
     //xxxxx
   finally
-    FOwner.FSyncLock.Leave;
+    if nLock then FOwner.FSyncLock.Leave;
   end;
 end;
 

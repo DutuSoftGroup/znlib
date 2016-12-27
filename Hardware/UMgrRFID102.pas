@@ -10,22 +10,24 @@ uses
   Windows, Classes, SysUtils, SyncObjs, NativeXml, IdTCPClient, IdGlobal,
   UWaitItem, USysLoger, ULibFun, UMgrRFID102_Head;
 
-type
-  PRFIDSetRelay = ^TRFIDSetRelay;
-  TRFIDSetRelay = record
-    FBase      : TRFIDReaderCmd;
-    FReaderID  : string;
-  end;
-
 const
   cHYReader_Wait_Short     = 150;
   cHYReader_Wait_Long      = 2 * 1000;
   cHYReader_MaxThread      = 10;
-  cHYReader_ConnectRelay   = $03;  //闭合继电器
-  cHYReader_DisConnRelay   = $00;  //断开继电器
-  cHYReader_Sleep_Short    = 10;   //SOCKET 间隔
+  
+  cHYReader_ConnectRelay   = Char($03);  //闭合继电器
+  cHYReader_DisConnRelay   = Char($00);  //断开继电器
+  cHYReader_CommandRetry   = 3;          //错误后尝试
+  cHYReader_Sleep_Short    = 10;         //SOCKET间隔
 
 type
+  PHYReaderSetRelay = ^THYReaderSetRelay;
+  THYReaderSetRelay = record
+    FCommand : TRFIDReaderCmd; //读头指令
+    FReader  : string;         //读头标识
+    FTimes   : Integer;        //发送次数
+  end;
+
   THYReaderVType = (rt900, rt02n);
   //虚拟读头类型: 900m,02n
 
@@ -49,10 +51,12 @@ type
     FKeepOnce: Integer;        //单次保持
     FKeepPeer: Boolean;        //保持模式
     FKeepLast: Int64;          //上次活动
+    FRelayConn: Boolean;       //是否吸合
     FClient : TIdTCPClient;    //通信链路
 
-    FCardLength: Integer;      //卡号长度
-    FCardPrefix: TStrings;     //前缀控制
+    FCardLen: Integer;         //卡号长度
+    FCardPre: TStrings;        //前缀控制
+    FOptions: TStrings;        //附加选项
   end;
 
   THYReaderThreadType = (ttAll, ttActive);
@@ -81,10 +85,10 @@ type
     //扫描可用
     function ReadCard(const nReader: PHYReaderItem): Boolean;
     //读卡片
-    function IsCardValid(const nCard: string; const nReader: PHYReaderItem): Boolean;
+    function IsCardValid(var nCard: string; const nReader: PHYReaderItem): Boolean;
     //校验卡号
-    procedure DoReaderCommand;
-    //处理读卡器指定
+    function SendReaderCommand(const nReader: PHYReaderItem): Boolean;
+    //发送指令
   public
     constructor Create(AOwner: THYReaderManager; AType: THYReaderThreadType);
     destructor Destroy; override;
@@ -109,8 +113,11 @@ type
     //读头索引
     FReaders: TList;
     //读头列表
+    FCardLength: Integer;
+    FCardPrefix: TStrings;
+    //卡号标识
     FBuffData: TList;
-    //临时缓冲
+    //数据缓冲
     FSyncLock: TCriticalSection;
     //同步锁定
     FThreads: array[0..cHYReader_MaxThread-1] of THYRFIDReader;
@@ -119,12 +126,15 @@ type
     FOnEvent: THYReaderEvent;
     //事件定义
   protected
+    procedure ClearBuffer(const nFree: Boolean);
     procedure ClearReaders(const nFree: Boolean);
     //清理资源
     procedure CloseReader(const nReader: PHYReaderItem);
     //关闭读头
-    procedure ClearBuffer(const nList: TList);
-    //清理缓冲
+    function FindReader(const nReader: string): Integer;
+    //检索读头
+    procedure ConnRelay(const nReader: string; const nActive: Boolean);
+    //开合继电器
   public
     constructor Create;
     destructor Destroy; override;
@@ -134,10 +144,9 @@ type
     procedure StartReader;
     procedure StopReader;
     //启停读头
-    procedure ActiveRelay(const nReader: string; nActive: Boolean=True);
-    //启停继电器
     procedure OpenDoor(const nReader: string);
     //打开道闸
+    property Readers: TList read FReaders;
     property OnCardProc: THYReaderProc read FOnProc write FOnProc;
     property OnCardEvent: THYReaderEvent read FOnEvent write FOnEvent;
     //属性相关
@@ -164,7 +173,10 @@ begin
   for nIdx:=Low(FThreads) to High(FThreads) do
     FThreads[nIdx] := nil;
   //xxxxx
-    
+
+  FCardLength := 0;
+  FCardPrefix := TStringList.Create;
+  
   FReaders := TList.Create;
   FBuffData := TList.Create;
   FSyncLock := TCriticalSection.Create;
@@ -174,23 +186,25 @@ destructor THYReaderManager.Destroy;
 begin
   StopReader;
   ClearReaders(True);
-  ClearBuffer(FBuffData);
-  
-  FBuffData.Free;
+  ClearBuffer(True);
+
+  FCardPrefix.Free;
   FSyncLock.Free;
   inherited;
 end;
 
-procedure THYReaderManager.ClearBuffer(const nList: TList);
+procedure THYReaderManager.ClearBuffer(const nFree: Boolean);
 var nIdx: Integer;
-    nBase: PRFIDSetRelay;
 begin
-  for nIdx:=nList.Count - 1 downto 0 do
+  for nIdx:=FBuffData.Count - 1 downto 0 do
   begin
-    nBase := nList[nIdx];
-    Dispose(PRFIDSetRelay(nBase));
-    nList.Delete(nIdx);
+    Dispose(PHYReaderSetRelay(FBuffData[nIdx]));
+    FBuffData.Delete(nIdx);
   end;
+
+  if nFree then
+    FreeAndNil(FBuffData);
+  //xxxxx
 end;
 
 procedure THYReaderManager.ClearReaders(const nFree: Boolean);
@@ -203,9 +217,9 @@ begin
     nItem.FClient.Free;
     nItem.FClient := nil;
 
-    nItem.FCardPrefix.Free;
-    nItem.FCardPrefix := nil;
-    
+    FreeAndNil(nItem.FCardPre);
+    FreeAndNil(nItem.FOptions);
+       
     Dispose(nItem);
     FReaders.Delete(nIdx);
   end;
@@ -278,37 +292,67 @@ begin
   end;
 end;
 
-//Desc: 对nReader读头执行继电器操作
-procedure THYReaderManager.ActiveRelay(const nReader: string; nActive: Boolean);
+//Date: 2016-11-24
+//Parm: 读头标识
+//Desc: 检索nReader的索引
+function THYReaderManager.FindReader(const nReader: string): Integer;
 var nIdx: Integer;
-    nData: string;
-    nPtr: PRFIDSetRelay;
-    nBase: TRFIDReaderCmd;
+begin
+  Result := -1;
+
+  for nIdx:=FReaders.Count-1 downto 0 do
+  if CompareText(PHYReaderItem(FReaders[nIdx]).FID, nReader) = 0 then
+  begin
+    Result := nIdx;
+    Exit;
+  end;
+end;
+
+//Date: 2016-11-23
+//Parm: 读头;开合继电器
+//Desc: 对nReader读头执行继电器开合操作
+procedure THYReaderManager.ConnRelay(const nReader: string;
+ const nActive: Boolean);
+var nStr: string;
+    nIdx: Integer;
+    nCmd: PHYReaderSetRelay;
 begin
   FSyncLock.Enter;
   try
+    nIdx := FindReader(nReader);
+    if nIdx < 0 then
+    begin
+      nStr := Format('reader %s not exits.', [nReader]);
+      raise Exception.Create(nStr);
+    end;
+
+    if not PHYReaderItem(FReaders[nIdx]).FEnable then Exit;
+    //invalid reader
+
     if nActive then
-         nData := Chr(cHYReader_ConnectRelay)
-    else nData := Chr(cHYReader_DisConnRelay);
+         nStr := cHYReader_ConnectRelay
+    else nStr := cHYReader_DisConnRelay;
 
     for nIdx:=FBuffData.Count - 1 downto 0 do
     begin
-      nBase := PRFIDSetRelay(FBuffData[nIdx]).FBase;
-      if nBase.FCmd <> tCmd_Reader_SetReLay then Exit;
-
-      nPtr := PRFIDSetRelay(FBuffData[nIdx]);   
-      if (CompareText(nReader, nPtr.FReaderID) = 0) and nActive and
-         (nPtr.FBase.FData = nData) then Exit;
-      //同一个读卡器上吸合指令保存一次   
+      nCmd := FBuffData[nIdx];
+      if (CompareText(nReader, nCmd.FReader) = 0) and
+         (nCmd.FCommand.FData = nStr) then Exit;
+      //same reader,same command
     end;
 
-    New(nPtr);
-    FBuffData.Add(nPtr);
+    New(nCmd);
+    FBuffData.Add(nCmd);
 
-    nPtr.FBase.FCmd := tCmd_Reader_SetReLay;
-    nPtr.FBase.FAddr:= Chr($00);
-    nPtr.FBase.FData:= nData;
-    nPtr.FReaderID := nReader;
+    with nCmd.FCommand do
+    begin
+      FCmd := tCmd_Reader_SetReLay;
+      FAddr:= Chr($00);
+      FData:= nStr;
+    end;
+
+    nCmd.FTimes := 0;
+    nCmd.FReader := nReader; 
   finally
     FSyncLock.Leave;
   end;
@@ -317,9 +361,7 @@ end;
 //Desc: 对nReader读头执行抬杆操作
 procedure THYReaderManager.OpenDoor(const nReader: string);
 begin
-  ActiveRelay(nReader);
-  Sleep(500);
-  ActiveRelay(nReader, False);
+  ConnRelay(nReader, True);
 end;
 
 procedure THYReaderManager.LoadConfig(const nFile: string);
@@ -343,6 +385,16 @@ begin
       if Assigned(nNode) then
         Self.FEnable := nNode.ValueAsString <> 'N';
       //xxxxx
+
+      nNode := nRoot.FindNode('cardlen');
+      if Assigned(nNode) then
+           FCardLength := nNode.ValueAsInteger
+      else FCardLength := 0;
+
+      nNode := nRoot.FindNode('cardprefix');
+      if Assigned(nNode) then
+           SplitStr(UpperCase(nNode.ValueAsString), FCardPrefix, 0, ',')
+      else FCardPrefix.Clear;
 
       nNode := nRoot.FindNode('thread');
       if Assigned(nNode) then
@@ -382,6 +434,9 @@ begin
         FLocked := False;
         FKeepLast := 0;
         FLastActive := GetTickCount;
+
+        FRelayConn := True;
+        //默认吸合时,会发送断开指令
 
         FID := AttributeByName['id'];
         FHost := NodeByName('ip').ValueAsString;
@@ -431,14 +486,22 @@ begin
 
         nTmp := FindNode('cardlen');
         if Assigned(nTmp) then
-             FCardLength := nTmp.ValueAsInteger
-        else FCardLength := 0;
+             FCardLen := nTmp.ValueAsInteger
+        else FCardLen := 0;
 
-        FCardPrefix := TStringList.Create;
         nTmp := FindNode('cardprefix');
         if Assigned(nTmp) then
-             SplitStr(UpperCase(nTmp.ValueAsString), FCardPrefix, 0, ',')
-        else FCardPrefix.Clear;
+        begin
+          FCardPre := TStringList.Create;
+          SplitStr(UpperCase(nTmp.ValueAsString), FCardPre, 0, ',');
+        end else FCardPre := nil;
+
+        nTmp := FindNode('options');
+        if Assigned(nTmp) then
+        begin
+          FOptions := TStringList.Create;
+          SplitStr(nTmp.ValueAsString, FOptions, 0, ';');
+        end else FOptions := nil;
       end;
     end;
   finally
@@ -575,9 +638,6 @@ end;
 
 procedure THYRFIDReader.DoExecute;
 begin
-  DoReaderCommand;
-  //处理读卡器信息
-
   FOwner.FSyncLock.Enter;
   try
     if FThreadType = ttAll then
@@ -613,7 +673,7 @@ begin
 
   if Assigned(FActiveReader) and (not Terminated) then
   try
-    if ReadCard(FActiveReader) then
+    if SendReaderCommand(FActiveReader) or ReadCard(FActiveReader) then
     begin
       if FThreadType = ttActive then
         FWaiter.Interval := cHYReader_Wait_Short;
@@ -762,27 +822,52 @@ end;
 //Date: 2015-12-07
 //Parm: 卡号
 //Desc: 验证nCard是否有效
-function THYRFIDReader.IsCardValid(const nCard: string;
+function THYRFIDReader.IsCardValid(var nCard: string;
   const nReader: PHYReaderItem): Boolean;
 var nIdx: Integer;
 begin
+  Result := False;
+  nCard := UpperCase(Trim(nCard));
+
+  nIdx := Length(nCard);
+  if nIdx < 1 then Exit;
+
+  if (nReader.FCardLen > 0) or Assigned(nReader.FCardPre) then
+  begin
+    if (nReader.FCardLen > 0) and (nIdx < nReader.FCardLen) then Exit;
+    //length verify
+
+    if Assigned(nReader.FCardPre) then
+    begin
+      Result := nReader.FCardPre.Count = 0;
+      if Result then Exit;
+
+      for nIdx:=nReader.FCardPre.Count - 1 downto 0 do
+      if Pos(nReader.FCardPre[nIdx], nCard) = 1 then
+      begin
+        Result := True;
+        Break;
+      end;
+    end;
+
+    Exit;
+    //读头私有配置优先
+  end;
+
   with FOwner do
   begin
-    Result := False;
-    nIdx := Length(Trim(nCard));
-    if (nIdx < 1) or (
-       (nReader.FCardLength > 0) and (nIdx < nReader.FCardLength)) then Exit;
+    if (FCardLength > 0) and (nIdx < FCardLength) then Exit;
     //leng verify
 
-    Result := nReader.FCardPrefix.Count = 0;
+    Result := FCardPrefix.Count = 0;
     if Result then Exit;
 
-    for nIdx:=nReader.FCardPrefix.Count - 1 downto 0 do
-     if Pos(nReader.FCardPrefix[nIdx], nCard) = 1 then
-     begin
-       Result := True;
-       Exit;
-     end;
+    for nIdx:=FCardPrefix.Count - 1 downto 0 do
+    if Pos(FCardPrefix[nIdx], nCard) = 1 then
+    begin
+      Result := True;
+      Exit;
+    end;
   end;
 end;
 
@@ -795,9 +880,6 @@ begin
   if not nReader.FClient.Connected then
     nReader.FClient.Connect;
   Result := False;
-
-  FOwner.ActiveRelay(nReader.FID, False);
-  //发送一次释放继电器指令
 
   with FSendItem do
   begin
@@ -875,81 +957,83 @@ begin
   end;
 end;
 
-procedure THYRFIDReader.DoReaderCommand;
-var nPtr: PRFIDSetRelay;
-    nBuf,nRecv: TIdBytes;
-    nIdx, nJdx, nInt: Integer;
-    nReader, nTmp: PHYReaderItem;
+//Date: 2016-11-23
+//Parm: 读头
+//Desc: 执行nReader上的指令
+function THYRFIDReader.SendReaderCommand(const nReader: PHYReaderItem): Boolean;
+var nIdx: Integer;
+    nBuf: TIdBytes;
+    nCmd,nTmp: PHYReaderSetRelay;
 begin
-  with FOwner do
+  Result := False;
+  if nReader.FRelayConn then
   begin
+    nReader.FRelayConn := False;
+    FOwner.ConnRelay(nReader.FID, False);
+  end; //disconn relay
+
+  with FOwner do
+  try
     FSyncLock.Enter;
-    try
-      nIdx := 0;
-      while nIdx < FBuffData.Count do
+    //lock sync
+
+    nIdx := 0;
+    nCmd := nil;
+
+    while nIdx < FBuffData.Count do
+    begin
+      nTmp := FBuffData[nIdx];
+      if CompareText(nTmp.FReader, nReader.FID) <> 0 then
       begin
-        nPtr := FBuffData[nIdx];
-
-        if nPtr.FBase.FCmd <> tCmd_Reader_SetReLay then
-        begin
-          Dispose(nPtr);
-          FBuffData.Delete(nIdx);
-          Continue;
-        end;
-        //非继电器设置指令删除
-
-        nReader := nil;
-        for nJdx := 0 to FReaders.Count-1 do
-        begin
-          nTmp := FReaders[nJdx];
-
-          if (CompareText(nTmp.FID, nPtr.FReaderID) = 0) and
-             (nTmp.FEnable) and (not nTmp.FLocked) then
-          begin
-            nReader := nTmp;
-            Break;
-          end;  
-        end;
-
-        if Assigned(nReader) then
-        begin
-          try
-            if not nReader.FClient.Connected then
-              nReader.FClient.Connect;
-            //make sure connect
-
-            Str2Buf(PackSendData(@nPtr.FBase), nBuf);
-            nReader.FClient.IOHandler.Write(nBuf);
-            Sleep(cHYReader_Sleep_Short);
-            //send data
-
-            nReader.FClient.IOHandler.ReadBytes(nRecv, 1, False);
-            if Length(nRecv) > 0 then    //get data length first
-            begin
-              nInt := nRecv[0];
-              nReader.FClient.IOHandler.ReadBytes(nRecv, nInt, True);
-              nReader.FClient.IOHandler.InputBuffer.Clear;
-
-              Dispose(nPtr);
-              FBuffData.Delete(nIdx);
-              Continue;
-            end;
-          except
-            on E: Exception do
-            begin
-              WriteLog(Format('Reader:[ %s:%d ] Msg: %s', [nReader.FHost,
-                nReader.FPort, E.Message]));
-              nReader.FClient.Disconnect;
-            end;   
-          end;
-        end;
-
         Inc(nIdx);
+        Continue;
       end;
-    finally
-      FSyncLock.Leave;
-    end;
-  end;  
+
+      if nTmp.FTimes < cHYReader_CommandRetry then
+      begin
+        nCmd := nTmp;
+        Inc(nCmd.FTimes);
+        Break;
+      end else
+      begin
+        Dispose(nTmp);
+        FBuffData.Delete(nIdx);
+      end;
+    end; 
+
+    if not Assigned(nCmd) then Exit;
+    //no command on reader
+  finally
+    FSyncLock.Leave;
+  end;
+
+  if not nReader.FClient.Connected then
+    nReader.FClient.Connect;
+  //make sure connect
+
+  Str2Buf(PackSendData(@nCmd.FCommand), nBuf);
+  nReader.FClient.IOHandler.Write(nBuf);
+  //send data
+
+  Sleep(cHYReader_Sleep_Short);
+  nReader.FClient.IOHandler.ReadBytes(nBuf, 1, False);
+  //get data length first
+  
+  if Length(nBuf) > 0 then
+  begin
+    nIdx := nBuf[0];
+    nReader.FClient.IOHandler.ReadBytes(nBuf, nIdx, True);
+  end;
+
+  if nCmd.FCommand.FData = cHYReader_ConnectRelay then
+  begin
+    nReader.FRelayConn := True;
+    //to disconn next time
+  end;
+
+  nCmd.FTimes := cHYReader_CommandRetry;
+  //send success,to dispose
+  Result := True;
 end;
 
 initialization

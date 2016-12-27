@@ -22,6 +22,7 @@
 *.hostport: 网络通讯时端口
 *.minval: 地磅下限;enable为是否启用(y/n)
 *.maxval: 地磅上限;valid为超上线时取值;enable为是否启用(y/n)
+*.options: 附加参数,用于特定业务
 
 节点: cameras->item
 *.host: 摄像机IP
@@ -40,13 +41,13 @@
 *.cardInterval: 两次读卡的间隔,单位秒.
 *.sampleNum: 读磅采样个数
 *.sampleFloat: 采样平均值和单值的浮动,单位公斤
-*.additional: 附加参数,Key=Value;Key=Value形式.
+*.options: 附加参数,Key=Value;Key=Value形式.
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-->
 <pounds>
   <ports>
 	<item id="P1" name="一期1号磅">
 		<type>T800</type>
-		<conn>tcp</conn>
+        <conn>tcp</conn>
 		<port>com14</port>
 		<rate>2400</rate>
 		<databit>7</databit>
@@ -62,12 +63,11 @@
 		<invalidend>2</invalidend>
 		<datamirror>0</datamirror>
 		<dataenlarge>0.001</dataenlarge>
-		<hostip>127.0.0.1</hostip>
-		<hostport>8000</hostport>
-		<minval enable="n">80</minval>
-		<maxval enable="n" valid="80">80</maxval>
-		<signflag pos="2" subpos="2" value="1">N</signflag>
-		<overload pos="2" subpos="3" value="1">N</overload>
+        <hostip>127.0.0.1</hostip>
+        <hostport>8000</hostport>
+        <minval enable="n">80</minval>
+        <maxval enable="n" valid="80">80</maxval>
+        <options>key1=value;key2=values</options>
 	</item>
   </ports>
   <cameras>
@@ -91,7 +91,7 @@
 		<cardInterval>300</cardInterval>
 		<sampleNum>10</sampleNum>
 		<sampleFloat>20</sampleFloat>
-        <additional>voice=local</additional>
+        <options>key1=value;key2=values</options>
 	</item>
   </tunnels>
 </pounds>

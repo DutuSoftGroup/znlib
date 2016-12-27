@@ -390,13 +390,45 @@ end;
 //Parm: 待翻译内容
 //Desc: 返回nStr对应的UTF翻译资源
 function TCardSendThread.GetUTFResource(const nStr: WideString): WideString;
-var nRes: WideString;
+var nSA: string;
+    nRes,nWS: WideString;
     nIdx,nLen: Integer;
 begin
   Result := FFileUTF.Values[nStr];
   if Result <> '' then Exit;
 
+  nWS := '';
   nLen := Length(nStr);
+
+  for nIdx:=1 to nLen do
+  begin
+    nSA := nStr[nIdx];
+    if Windows.IsDBCSLeadByte(Byte(nSA[1])) then //双字节
+    begin
+      nWS := nWS + nSA; 
+      if nIdx < nLen then Continue;
+    end;
+
+    if nWS = '' then
+    begin
+      Result := Result + nSA;
+      //非汉字直接拼接
+    end else
+    begin
+      nRes := FFileUTF.Values[nWS];
+      //有对应翻译
+
+      if nRes = '' then
+           Result := Result + nWS
+      else Result := Result + nRes;
+      nWS := '';
+    end;
+  end;
+
+  if Result <> nStr then Exit;
+  //翻译成功
+
+  Result := '';
   for nIdx:=1 to nLen do
   begin
     nRes := FFileUTF.Values[nStr[nIdx]];

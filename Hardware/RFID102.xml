@@ -15,9 +15,10 @@
 *.virtual: Y,虚拟读头;其它不虚拟
 *.reader: 读头标识
 *.type: 900,900m远距离;02n,现场近距离
-*.group:分组类型，当卡片档案中的类型与读卡器类型一致时有效
 *.keeponce:同卡号连续刷卡时,卡号有效间隔,单位毫秒.
 *.keeppeer: Y,每keeponce视为一次;N,间隔keeponce刷卡视为一次.
+*.cardlen,cardprefix:卡片识别标识,比全局配置优先级高.
+*.options: 附加参数,用于特定业务
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-->
 <HY_RFID102>
   <config>
@@ -35,6 +36,9 @@
       <tunnel>FH001</tunnel>
       <keeponce keeppeer="N">5000</keeponce>
       <virtual reader="" type="900">N</virtual>
+      <cardlen>10</cardlen>
+      <cardprefix>C0F0</cardprefix>
+      <options>key1=value;key2=value</options>
     </reader>
   </readers>
 </HY_RFID102>

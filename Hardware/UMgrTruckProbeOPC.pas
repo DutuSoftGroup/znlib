@@ -221,7 +221,7 @@ end;
 procedure OnNew(const nFlag: string; const nType: Word; var nData: Pointer);
 var nItem: POPCServiceItem;
 begin
-  if nFlag = 'SrvData' then
+  if nFlag = 'OPCSrvData' then
   begin
     New(nItem);
     nData := nItem;
@@ -232,7 +232,7 @@ end;
 procedure OnFree(const nFlag: string; const nType: Word; const nData: Pointer);
 var nItem: POPCServiceItem;
 begin
-  if nFlag = 'SrvData' then
+  if nFlag = 'OPCSrvData' then
   begin
     nItem := nData;
     if Assigned(nItem.FWaiter) then
@@ -248,7 +248,7 @@ begin
   //xxxxx
 
   with gMemDataManager do
-    FIDServiceData := RegDataType('SrvData', 'OPCManager', OnNew, OnFree, 2);
+    FIDServiceData := RegDataType('OPCSrvData', 'OPCManager', OnNew, OnFree, 2);
   //xxxxx
 end;
 
