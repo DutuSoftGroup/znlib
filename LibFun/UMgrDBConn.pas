@@ -838,13 +838,14 @@ begin
     begin
       Inc(nStep);
       nException := E.Message;
-      WriteLog(nException);
     end;
   end;
 
   if nException <> '' then
+  begin
+    WriteLog('SQL: ' + nSQL + ' ::: ' + nException);
     raise Exception.Create(nException);
-  //xxxxx
+  end;
 end;
 
 //Desc: ÷¥––≤È—Ø”Ôæ‰
@@ -887,13 +888,14 @@ begin
     begin
       Inc(nStep);
       nException := E.Message;
-      WriteLog(nException);
     end;
   end;
 
   if nException <> '' then
+  begin
+    WriteLog('SQL: ' + nSQL + ' ::: ' + nException);
     raise Exception.Create(nException);
-  //xxxxx
+  end;
 end;
 
 //Date: 2013-07-26
@@ -995,7 +997,7 @@ begin
       begin
         if nTrans then
           nDBConn.FConn.RollbackTrans;
-        WriteLog(E.Message);
+        WriteLog('SQL: ' + nSQLs.Text + ' ::: ' + E.Message);
       end;
     end;
   finally

@@ -47,7 +47,7 @@
   <ports>
 	<item id="P1" name="一期1号磅">
 		<type>T800</type>
-        <conn>tcp</conn>
+		<conn>tcp</conn>
 		<port>com14</port>
 		<rate>2400</rate>
 		<databit>7</databit>
@@ -63,22 +63,22 @@
 		<invalidend>2</invalidend>
 		<datamirror>0</datamirror>
 		<dataenlarge>0.001</dataenlarge>
-        <hostip>127.0.0.1</hostip>
-        <hostport>8000</hostport>
-        <minval enable="n">80</minval>
-        <maxval enable="n" valid="80">80</maxval>
-        <options>key1=value;key2=values</options>
+		<hostip>127.0.0.1</hostip>
+		<hostport>8000</hostport>
+		<minval enable="n">80</minval>
+		<maxval enable="n" valid="80">80</maxval>
+		<options>key1=value;key2=values</options>
 	</item>
   </ports>
   <cameras>
-    <item id="C1" name="一期DVR">
+	<item id="C1" name="一期DVR">
 		<host>192.168.200.43</host>
 		<port>8000</port>
 		<user>admin</user>
 		<password>12345</password>
 		<picsize>0</picsize>
 		<picquality>1</picquality>
-    </item>
+	</item>
   </cameras>
   <tunnels>
 	<item id="B1" name="一期1号磅 - 出">
@@ -91,7 +91,7 @@
 		<cardInterval>300</cardInterval>
 		<sampleNum>10</sampleNum>
 		<sampleFloat>20</sampleFloat>
-        <options>key1=value;key2=values</options>
+		<options>key1=value;key2=values</options>
 	</item>
   </tunnels>
 </pounds>

@@ -6,6 +6,7 @@
 *.monitor: 负责扫描不活动读头的线程个数,不超过线程总数
 *.cardlen: 卡片号码最小长度,默认检查
 *.cardprefix: 卡片号码前缀,多个时用逗号(,)分割,默认不检查
+*.connkeep: 继电器吸合保持,单位毫秒
 
 节点: readers.reader
 *.enable: N,关闭;其它开启.
@@ -27,6 +28,7 @@
     <monitor>1</monitor>
     <cardlen>10</cardlen>
     <cardprefix>C0F0</cardprefix>
+    <connkeep>3000</connkeep>
   </config>
   <readers>
     <reader id="01001">
@@ -38,6 +40,7 @@
       <virtual reader="" type="900">N</virtual>
       <cardlen>10</cardlen>
       <cardprefix>C0F0</cardprefix>
+      <connkeep>3000</connkeep>
       <options>key1=value;key2=value</options>
     </reader>
   </readers>

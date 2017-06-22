@@ -4,11 +4,13 @@
 *******************************************************************************}
 unit UMgrChannel;
 
+{$I LibFun.inc}
 interface
 
 uses
   Windows, Classes, SysUtils, SyncObjs, uROClient, uROWinInetHttpChannel,
-  uROBinMessage, uROSOAPMessage, UBaseObject;
+  uROBinMessage, uROSOAPMessage, {$IFDEF RO_v90}uROMessage, {$ENDIF}
+  UBaseObject;
 
 type
   TChannelMsgType = (mtBin, mtSoap);

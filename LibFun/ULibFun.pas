@@ -12,7 +12,7 @@ interface
 
 uses
   Windows, Classes, Controls, Forms, Messages, SysUtils, IniFiles, ShellAPI,
-  ZnMd5, UMgrVar, ULibRes;
+  ZnMd5, UBase64, UMgrVar, ULibRes;
 
 //------------------------------------------------------------------------------
 type
@@ -112,6 +112,9 @@ function IsValidConfigFile(const nFile,nSeed: string): Boolean;
 //校验nFile是否合法配置文件
 procedure AddVerifyData(const nFile,nSeed: string);
 //为nFile添加校验信息
+function IsSystemExpire(const nFile: string): Boolean;
+procedure AddExpireDate(const nFile,nDate: string; const nInit: Boolean);
+//系统日期限制
 
 //------------------------------------------------------------------------------
 function GetPinYinOfStr(const nChinese: WideString): string;
@@ -519,20 +522,20 @@ begin
 
     if nAdd then
     begin
-      if Copy(nStr, 1, nSLen) <> nSymbol then
+      if Copy(nList[nIdx], 1, nSLen) <> nSymbol then
         nStr := nSymbol + nStr;
       //xxxxx
 
-      if Copy(nStr, nLen - nSLen + 1, nSLen) <> nSymbol then
+      if Copy(nList[nIdx], nLen - nSLen + 1, nSLen) <> nSymbol then
         nStr := nStr + nSymbol;
       //xxxxx
     end else
     begin
-      if Copy(nStr, 1, nSLen) = nSymbol then
+      if Copy(nList[nIdx], 1, nSLen) = nSymbol then
         nStr := Copy(nStr, 2, nLen - 1);
       //xxxxx
 
-      if Copy(nStr, nLen - nSLen + 1, nSLen) = nSymbol then
+      if Copy(nList[nIdx], nLen - nSLen + 1, nSLen) = nSymbol then
         nStr := Copy(nStr, 1, nLen - nSLen);
       //xxxxx
     end;
@@ -953,6 +956,83 @@ begin
     nList.SaveToFile(nFile);
   finally
     nList.Free;
+  end;
+end;
+
+//Date: 2017-05-18
+//Parm: 配置文件;日期;是否初始化
+//Desc: 添加过期日期限制
+procedure AddExpireDate(const nFile,nDate: string; const nInit: Boolean);
+var nStr,nEn: string;
+begin
+  with TIniFile.Create(nFile) do
+  try
+    if nInit then
+    begin
+      nStr := EncodeBase64(nDate);
+      WriteString('System', 'Expire', nStr);
+
+      nEn := EncodeBase64(Date2Str(Now));
+      nStr := nStr + nEn;
+      WriteString('System', 'DateBase', nEn);
+      WriteString('System', 'DateUpdate', nEn);
+
+      nStr := 'run_' + nStr;
+      WriteString('System', 'DateVerify', MD5Print(MD5String(nStr)));
+    end else
+    begin
+      nEn := ReadString('System', 'DateBase', '');
+      nEn := DecodeBase64(nEn);
+
+      if Date2Str(Now) <> nEn then
+      begin
+        if Date() < Str2Date(nEn) then
+        begin
+          nStr := ReadString('System', 'DateUpdate', '');
+          nStr := DecodeBase64(nStr);
+
+          if Date() = Str2Date(nStr) then Exit;
+          nEn := Date2Str(Str2Date(nEn) + 1)
+        end else nEn := Date2Str(Now);
+
+        nEn := EncodeBase64(nEn);
+        WriteString('System', 'DateBase', nEn);
+
+        nStr := 'run_' + ReadString('System', 'Expire', '') + nEn;
+        WriteString('System', 'DateVerify', MD5Print(MD5String(nStr)));
+
+        nEn := EncodeBase64(Date2Str(Now));
+        WriteString('System', 'DateUpdate', nEn);
+      end;
+    end;
+  finally
+    Free;
+  end;   
+end;
+
+//Date: 2017-05-18
+//Parm: 配置文件
+//Desc: 验证nFile文件配置的日期是否过期
+function IsSystemExpire(const nFile: string): Boolean;
+var nStr,nEn: string;
+begin
+  with TIniFile.Create(nFile) do
+  try
+    Result := True;
+    AddExpireDate(nFile, '', False);
+
+    nStr := ReadString('System', 'Expire', '');
+    nEn := ReadString('System', 'DateBase', '');
+
+    if ReadString('System', 'DateVerify', '') =
+       MD5Print(MD5String('run_' + nStr + nEn)) then
+    begin
+      nStr := DecodeBase64(nStr);
+      nEn := DecodeBase64(nEn);
+      Result := Str2Date(nStr) <= Str2Date(nEn);
+    end;
+  finally
+    Free;
   end;
 end;
 

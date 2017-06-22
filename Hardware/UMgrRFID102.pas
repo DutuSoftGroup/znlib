@@ -51,7 +51,10 @@ type
     FKeepOnce: Integer;        //单次保持
     FKeepPeer: Boolean;        //保持模式
     FKeepLast: Int64;          //上次活动
+    
     FRelayConn: Boolean;       //是否吸合
+    FConnLast: Int64;          //上次吸合
+    FConnKeep: Integer;        //吸合保持
     FClient : TIdTCPClient;    //通信链路
 
     FCardLen: Integer;         //卡号长度
@@ -365,7 +368,7 @@ begin
 end;
 
 procedure THYReaderManager.LoadConfig(const nFile: string);
-var nIdx: Integer;
+var nIdx,nKeep: Integer;
     nXML: TNativeXml;  
     nReader: PHYReaderItem;
     nRoot,nNode,nTmp: TXmlNode;
@@ -377,44 +380,50 @@ begin
   try
     nXML := TNativeXml.Create;
     nXML.LoadFromFile(nFile);
-
     nRoot := nXML.Root.FindNode('config');
-    if Assigned(nRoot) then
-    begin
-      nNode := nRoot.FindNode('enable');
-      if Assigned(nNode) then
-        Self.FEnable := nNode.ValueAsString <> 'N';
-      //xxxxx
 
-      nNode := nRoot.FindNode('cardlen');
-      if Assigned(nNode) then
-           FCardLength := nNode.ValueAsInteger
-      else FCardLength := 0;
+    if not Assigned(nRoot) then
+      raise Exception.Create('Invalid RFID102 Config File.');
+    //xxxxx
 
-      nNode := nRoot.FindNode('cardprefix');
-      if Assigned(nNode) then
-           SplitStr(UpperCase(nNode.ValueAsString), FCardPrefix, 0, ',')
-      else FCardPrefix.Clear;
+    nNode := nRoot.FindNode('enable');
+    if Assigned(nNode) then
+      Self.FEnable := nNode.ValueAsString <> 'N';
+    //xxxxx
 
-      nNode := nRoot.FindNode('thread');
-      if Assigned(nNode) then
-           FThreadCount := nNode.ValueAsInteger
-      else FThreadCount := 1;
+    nNode := nRoot.FindNode('cardlen');
+    if Assigned(nNode) then
+         FCardLength := nNode.ValueAsInteger
+    else FCardLength := 0;
 
-      if (FThreadCount < 1) or (FThreadCount > cHYReader_MaxThread) then
-        raise Exception.Create('RFID102 Reader Thread-Num Need Between 1-10.');
-      //xxxxx
+    nNode := nRoot.FindNode('cardprefix');
+    if Assigned(nNode) then
+         SplitStr(UpperCase(nNode.ValueAsString), FCardPrefix, 0, ',')
+    else FCardPrefix.Clear;
 
-      nNode := nRoot.FindNode('monitor');
-      if Assigned(nNode) then
-           FMonitorCount := nNode.ValueAsInteger
-      else FMonitorCount := 1;
+    nNode := nRoot.FindNode('thread');
+    if Assigned(nNode) then
+         FThreadCount := nNode.ValueAsInteger
+    else FThreadCount := 1;
 
-      if (FMonitorCount < 1) or (FMonitorCount > FThreadCount) then
-        raise Exception.Create(Format(
-          'RFID102 Reader Monitor-Num Need Between 1-%d.', [FThreadCount]));
-      //xxxxx
-    end;
+    if (FThreadCount < 1) or (FThreadCount > cHYReader_MaxThread) then
+      raise Exception.Create('RFID102 Reader Thread-Num Need Between 1-10.');
+    //xxxxx
+
+    nNode := nRoot.FindNode('monitor');
+    if Assigned(nNode) then
+         FMonitorCount := nNode.ValueAsInteger
+    else FMonitorCount := 1;
+
+    if (FMonitorCount < 1) or (FMonitorCount > FThreadCount) then
+      raise Exception.Create(Format(
+        'RFID102 Reader Monitor-Num Need Between 1-%d.', [FThreadCount]));
+    //xxxxx
+
+    nNode := nRoot.FindNode('connkeep');
+    if Assigned(nNode) then
+         nKeep := nNode.ValueAsInteger
+    else nKeep := 3000;
 
     //--------------------------------------------------------------------------
     nRoot := nXML.Root.FindNode('readers');
@@ -435,6 +444,7 @@ begin
         FKeepLast := 0;
         FLastActive := GetTickCount;
 
+        FConnLast := 0;
         FRelayConn := True;
         //默认吸合时,会发送断开指令
 
@@ -495,6 +505,11 @@ begin
           FCardPre := TStringList.Create;
           SplitStr(UpperCase(nTmp.ValueAsString), FCardPre, 0, ',');
         end else FCardPre := nil;
+
+        nTmp := FindNode('connkeep');
+        if Assigned(nTmp) then
+             FConnKeep := nTmp.ValueAsInteger
+        else FConnKeep := nKeep;
 
         nTmp := FindNode('options');
         if Assigned(nTmp) then
@@ -836,6 +851,7 @@ begin
   begin
     if (nReader.FCardLen > 0) and (nIdx < nReader.FCardLen) then Exit;
     //length verify
+    Result := True;
 
     if Assigned(nReader.FCardPre) then
     begin
@@ -966,8 +982,10 @@ var nIdx: Integer;
     nCmd,nTmp: PHYReaderSetRelay;
 begin
   Result := False;
-  if nReader.FRelayConn then
+  if (nReader.FRelayConn) and 
+     (GetTickCount - nReader.FConnLast > nReader.FConnKeep) then
   begin
+    nReader.FConnLast := 0;
     nReader.FRelayConn := False;
     FOwner.ConnRelay(nReader.FID, False);
   end; //disconn relay
@@ -1028,6 +1046,7 @@ begin
   if nCmd.FCommand.FData = cHYReader_ConnectRelay then
   begin
     nReader.FRelayConn := True;
+    nReader.FConnLast := GetTickCount;
     //to disconn next time
   end;
 
