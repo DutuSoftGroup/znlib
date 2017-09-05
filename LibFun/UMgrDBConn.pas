@@ -50,6 +50,9 @@ type
     FWaiter: TWaitObject;                       //延迟对象
     FUsed : Integer;                            //排队计数
     FLock : TCriticalSection;                   //同步锁定
+
+    FThreadID: THandle;                         //所在线程
+    FCallNum: Integer;                          //调用计数
     FConnItem: Pointer;                         //所属连接项(专用)
   end;
 
@@ -130,7 +133,8 @@ type
     function GetConnectionStr(const nID: string): string;
     class function MakeDBConnection(const nParam: TDBParam): string;
     //连接字符串
-    function GetConnection(const nID: string; var nErrCode: Integer): PDBWorker;
+    function GetConnection(const nID: string; var nErrCode: Integer;
+     const nThreadUnion: Boolean = False): PDBWorker;
     procedure ReleaseConnection(const nWorker: PDBWorker);
     //使用连接
     function Disconnection(const nID: string = ''): Integer;
@@ -566,10 +570,10 @@ end;
 
 //------------------------------------------------------------------------------
 //Date: 2011-10-23
-//Parm: 连接标识;错误码
+//Parm: 连接标识;错误码;同线程使用相同链路
 //Desc: 返回nID可用的数据连接对象
-function TDBConnManager.GetConnection(const nID: string;
- var nErrCode: Integer): PDBWorker;
+function TDBConnManager.GetConnection(const nID: string; var nErrCode: Integer;
+ const nThreadUnion: Boolean): PDBWorker;
 var nIdx: Integer;
     nParam: PDictData;
     nWorker: PDBWorker;
@@ -679,32 +683,60 @@ begin
     begin
       for nIdx:=Low(FWorker) to High(FWorker) do
       begin
-        if Assigned(FWorker[nIdx]) then
+        if (Assigned(FWorker[nIdx])) and
+           (FWorker[nIdx].FThreadID > 0) and
+           (FWorker[nIdx].FThreadID = GetCurrentThreadId) then
         begin
-          if FWorker[nIdx].FUsed < 1 then
-          begin
-            Result := FWorker[nIdx];
-            Break;
-          end;
+          Result := FWorker[nIdx];
+          Inc(Result.FCallNum);
+          Break;
+        end;
+      end; //优先扫描同线程链路
 
-          //排队最少的工作对象
-          if (not Assigned(Result)) or (FWorker[nIdx].FUsed < Result.FUsed) then
-          begin
-            Result := FWorker[nIdx];
-          end;
-        end else
+      if not Assigned(Result) then
+      begin
+        for nIdx:=Low(FWorker) to High(FWorker) do
         begin
-          Result := GetIdleWorker(True);
-          FWorker[nIdx] := Result;
-          if Assigned(Result) then Break;
-        end; //新工作对象
-      end;
+          if Assigned(FWorker[nIdx]) then
+          begin
+            if FWorker[nIdx].FUsed < 1 then
+            begin
+              Result := FWorker[nIdx];
+              Break;
+            end;
+
+            //排队最少的工作对象
+            if (not Assigned(Result)) or
+               (FWorker[nIdx].FUsed < Result.FUsed) then
+            begin
+              Result := FWorker[nIdx];
+            end;
+          end else
+          begin
+            Result := GetIdleWorker(True);
+            FWorker[nIdx] := Result;
+            if Assigned(Result) then Break;
+          end; //新工作对象
+        end;
+      end; //扫描空闲链路
 
       if Assigned(Result) then
       begin
         Inc(Result.FUsed);
         Inc(nItem.FUsed);
         Inc(FStatus.FNumObjWait);
+
+        if nThreadUnion and (Result.FThreadID < 1) then
+        begin
+          Inc(Result.FCallNum);
+          Result.FThreadID := GetCurrentThreadId;
+        end;
+        {-----------------------------------------------------------------------
+        原理:
+        1.调用方设置Worker所在的ThreadID.
+        2.由于被调用方优先检索同线程的Worker,检索成功后增加调用计数.
+        3.调用方使用完毕后,删除ThreadID.
+        -----------------------------------------------------------------------}
 
         if nItem.FUsed > FStatus.FNumWaitMax then
         begin
@@ -726,7 +758,8 @@ begin
   if Assigned(Result) then
   with Result^ do
   begin
-    FLock.Enter;
+    if Result.FCallNum <= 1 then
+      FLock.Enter;
     //工作对象进入排队
 
     if FConnClosing = cTrue then
@@ -741,7 +774,8 @@ begin
       FLock.Leave;
     end;
 
-    CoInitialize(nil);
+    if Result.FCallNum <= 1 then
+      CoInitialize(nil);
     //初始化COM对象
   end;
 end;
@@ -757,7 +791,15 @@ begin
 
   FSyncLock.Enter;
   try
+    if nWorker.FCallNum > 0 then
+      Dec(nWorker.FCallNum);
+    //同线程调用计数
+
+    if nWorker.FCallNum < 1 then
     try
+      nWorker.FThreadID := 0;
+      //同线程调用结束,删除线程标识
+      
       if nWorker.FQuery.Active then
         nWorker.FQuery.Close;
       //xxxxx
@@ -773,15 +815,16 @@ begin
     nItem.FLast := GetTickCount;
 
     Dec(nWorker.FUsed);
-    nWorker.FLock.Leave;
+    if nWorker.FCallNum < 1 then
+      nWorker.FLock.Leave;
     Dec(FStatus.FNumObjWait);
 
     if FConnClosing = cTrue then
       nWorker.FWaiter.Wakeup;
     //xxxxx
   finally
-    CoUnInitialize;
-    //释放COM对象
+    if nWorker.FCallNum < 1 then
+      CoUnInitialize; //释放COM对象    
     FSyncLock.Leave;
   end;
 end;

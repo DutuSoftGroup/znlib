@@ -157,10 +157,13 @@ type
     FHeight: Integer;       //高度
     FDataOE: Integer;       //OE设定
 
+    FHeadEnable: Boolean;
     FHeadRect: TRect;
     FHeadText: string;
     FHeadFont: TCardFont;   //表头
 
+    FDataEnable: Boolean;
+    FStatusEnable: Boolean;
     FColWidth: array of Integer;
     FRowNum: Integer;
     FRowHeight: Integer;
@@ -605,6 +608,10 @@ begin
   WriteLog('开始绘制:' + FNowItem.FName);
   {$ENDIF}
 
+  if not FNowItem.FDataEnable then
+    Exit;
+  //不使用数据区
+
   with FNowItem^, gTruckQueueManager do
   try
     nCur := 0;
@@ -672,10 +679,13 @@ begin
         nLine := Lines[nIdx];
         MidDrawText(nLine.FName, FFontHeadSAdjust, FFontHeadLAdjust);
 
-        if nLine.FIsValid then
-             nStr := '启用'
-        else nStr := '停用';
-        MidDrawText(nStr, FFontHeadSAdjust, FFontHeadLAdjust);
+        if FStatusEnable then
+        begin
+          if nLine.FIsValid then
+               nStr := '启用'
+          else nStr := '停用';
+          MidDrawText(nStr, FFontHeadSAdjust, FFontHeadLAdjust);
+        end;
 
         if nLine.FTrucks.Count < 1 then
           Inc(nIdx);
@@ -683,7 +693,8 @@ begin
 
         for i:=nCur to nLine.FTrucks.Count-1 do
         begin
-          if i-nCur >= FRowNum-2 then
+          if (FStatusEnable and (i-nCur >= FRowNum-2)) or
+             ((not FStatusEnable) and (i-nCur >= FRowNum-1)) then
           begin
             nCur := i;
             Break;
@@ -792,52 +803,60 @@ begin
       Exit;
     end;
 
-    with FHeadRect do
-     nRes := AddScreenProgramBmpTextArea(1, 0, Left, Top, Right-Left, Bottom-Top);
-    //xxxxx
+    nArea := 0;
+    //first area
 
-    if nRes <> RETURN_NOERROR then
+    //--------------------------------------------------------------------------
+    if FHeadEnable then
     begin
-      WriteLog(Format('AddScreenProgramBmpTextArea:%s', [GetErrorDesc(nRes)]));
-      Exit;
-    end else nArea := 0;
-
-    nStr := FTempDir + cSend_HeadFileRTF;
-    //default head file
-    
-    if (not FDoublePaint) or (not FileExists(nStr)) then
-    begin
-      nStr := FTempDir + cSend_HeadFile;
-      //normal txt file
-      
-      if not FileExists(nStr) then
-      begin
-        FFileOpt.Text := FHeadText;
-        FFileOpt.SaveToFile(nStr);
-        Sleep(1000); //wait I/O
-      end;
-    end; 
-
-    with FHeadFont do
-    begin
-      if FFontBold then
-           nIdx := 1
-      else nIdx := 0;
-
-      nRes := AddScreenProgramAreaBmpTextFile(1, 0, nArea,
-              PChar(nStr), 1,
-              PChar(FFontName), FFontSize, nIdx, 1, FEffect, FSpeed, FKeep);
+      with FHeadRect do
+       nRes := AddScreenProgramBmpTextArea(1, 0, Left, Top,
+                                           Right-Left, Bottom-Top);
       //xxxxx
-    end;
 
-    if nRes <> RETURN_NOERROR then
-    begin
-      WriteLog(Format('AddScreenProgramAreaBmpTextFile:%s', [GetErrorDesc(nRes)]));
-      Exit;
+      if nRes <> RETURN_NOERROR then
+      begin
+        WriteLog(Format('AddScreenProgramBmpTextArea:%s', [GetErrorDesc(nRes)]));
+        Exit;
+      end;
+
+      nStr := FTempDir + cSend_HeadFileRTF;
+      //default head file
+    
+      if (not FDoublePaint) or (not FileExists(nStr)) then
+      begin
+        nStr := FTempDir + cSend_HeadFile;
+        //normal txt file
+      
+        if not FileExists(nStr) then
+        begin
+          FFileOpt.Text := FHeadText;
+          FFileOpt.SaveToFile(nStr);
+          Sleep(1000); //wait I/O
+        end;
+      end; 
+
+      with FHeadFont do
+      begin
+        if FFontBold then
+             nIdx := 1
+        else nIdx := 0;
+
+        nRes := AddScreenProgramAreaBmpTextFile(1, 0, nArea,
+                PChar(nStr), 1,
+                PChar(FFontName), FFontSize, nIdx, 1, FEffect, FSpeed, FKeep);
+        //xxxxx
+      end;
+
+      if nRes <> RETURN_NOERROR then
+      begin
+        WriteLog(Format('AddScreenProgramAreaBmpTextFile:%s', [GetErrorDesc(nRes)]));
+        Exit;
+      end;
     end;
 
     //--------------------------------------------------------------------------
-    if FPicNum > 0 then
+    if FDataEnable and (FPicNum > 0) then
     begin
       with FDataRect do
         nRes := AddScreenProgramBmpTextArea(1, 0, Left, Top,
@@ -970,11 +989,13 @@ begin
       Exit;
     end;
 
+    nArea := 0;
+    //first area
+
+    //--------------------------------------------------------------------------
+    if FHeadEnable then
     with FHeadRect,FHeadFont do
     begin
-      nArea := 0;
-      //first area
-
       nRes := AddScreenDynamicArea(1, nArea, RUN_MODE_CYCLE_SHOW, 3600*24, 0, nil,
               0, Left, Top, Right-Left, Bottom-Top, 255, 0, 255, 1, 0, 1);
       //xxxxx
@@ -1027,7 +1048,7 @@ begin
     end;
 
     //--------------------------------------------------------------------------
-    if FPicNum > 0 then
+    if FDataEnable and (FPicNum > 0) then
     with FDataRect,FDataFont do
     begin
       nRes := AddScreenDynamicArea(1, nArea, RUN_MODE_CYCLE_SHOW, 3600*24, 0, nil,
@@ -1302,6 +1323,7 @@ begin
       //------------------------------------------------------------------------
       nNode := nXML.Root.Nodes[nIdx].FindNode('head_area');
       if not Assigned(nNode) then Continue;
+      FHeadEnable := nNode.AttributeByName['use_head'] <> 'N';
 
       with FHeadRect,nNode.NodeByName('rect') do
       begin
@@ -1317,6 +1339,8 @@ begin
       //------------------------------------------------------------------------
       nNode := nXML.Root.Nodes[nIdx].FindNode('data_area');
       if not Assigned(nNode) then Continue;
+      FDataEnable := nNode.AttributeByName['use_data'] <> 'N';
+      FStatusEnable := nNode.AttributeByName['use_status'] <> 'N';
 
       FRowNum := nNode.NodeByName('rownum').ValueAsInteger;
       FRowHeight := nNode.NodeByName('rowheight').ValueAsInteger;
@@ -1366,6 +1390,9 @@ begin
 
       if FFootEnable then
       begin
+        FFootEnable := nNode.AttributeByName['use_foot'] <> 'N';
+        //xxxxx
+
         with FFootRect,nNode.NodeByName('rect') do
         begin
           Left := StrToInt(AttributeByName['L']);

@@ -200,7 +200,12 @@ ResourceString
                 'D_FtePositon smallint)';                   //统计显示位置
   //datadict create sql
 
-  sInsertDict = 'Insert Into $Dict Values ($ItemID, ''$Entity'', ''$Title'',' +
+  sInsertDict = 'Insert Into $Dict(D_ItemID,D_Entity,D_Title,D_Align,D_Width,' +
+                'D_Index,D_Visible,D_LangID,D_DBTable,D_DBField,D_DBIsKey,' +
+                'D_DBType,D_DBWidth,D_DBDecimal,D_FmtStyle,D_FmtData,' +
+                'D_FmtFormat,D_FmtExtMemo,D_FteDisplay,D_FteFormat,D_FteKind,' +
+                'D_FtePositon' +
+                ') Values ($ItemID, ''$Entity'', ''$Title'',' +
                 '$Align, $Width, $Index, $Visible, $LangID, ''$DBTable'', ''$DBField'',' +
                 '$DBIsKey, $DBType, $DBWidth, $DBDecima, $FmtStyle, ''$FmtData'',' +
                 '''$FmtFormat'', ''$FmtExtMemo'', ''$FteDisplay'', ''$FteFormat'',' +

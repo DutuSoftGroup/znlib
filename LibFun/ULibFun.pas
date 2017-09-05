@@ -112,6 +112,8 @@ function IsValidConfigFile(const nFile,nSeed: string): Boolean;
 //校验nFile是否合法配置文件
 procedure AddVerifyData(const nFile,nSeed: string);
 //为nFile添加校验信息
+function GetCPUIDStr: string;
+//处理器标识
 function IsSystemExpire(const nFile: string): Boolean;
 procedure AddExpireDate(const nFile,nDate: string; const nInit: Boolean);
 //系统日期限制
@@ -522,20 +524,24 @@ begin
 
     if nAdd then
     begin
-      if Copy(nList[nIdx], 1, nSLen) <> nSymbol then
+      if Copy(nStr, 1, nSLen) <> nSymbol then
+      begin
         nStr := nSymbol + nStr;
-      //xxxxx
+        Inc(nLen, nSLen);
+      end;
 
-      if Copy(nList[nIdx], nLen - nSLen + 1, nSLen) <> nSymbol then
+      if Copy(nStr, nLen - nSLen + 1, nSLen) <> nSymbol then
         nStr := nStr + nSymbol;
       //xxxxx
     end else
     begin
-      if Copy(nList[nIdx], 1, nSLen) = nSymbol then
-        nStr := Copy(nStr, 2, nLen - 1);
-      //xxxxx
+      if Copy(nStr, 1, nSLen) = nSymbol then
+      begin
+        System.Delete(nStr, 1, nSLen);
+        Dec(nLen, nSLen);
+      end;
 
-      if Copy(nList[nIdx], nLen - nSLen + 1, nSLen) = nSymbol then
+      if Copy(nStr, nLen - nSLen + 1, nSLen) = nSymbol then
         nStr := Copy(nStr, 1, nLen - nSLen);
       //xxxxx
     end;
@@ -959,6 +965,46 @@ begin
   end;
 end;
 
+type
+  TCPUID  = array[1..4] of Longint;
+  //id record
+
+function GetCPUID: TCPUID; assembler; register;
+asm
+  PUSH    EBX         {Save affected register}
+  PUSH    EDI
+  MOV     EDI,EAX     {@Resukt}
+  MOV     EAX,1
+  DW      $A20F       {CPUID Command}
+  STOSD                {CPUID[1]}
+  MOV     EAX,EBX
+  STOSD               {CPUID[2]}
+  MOV     EAX,ECX
+  STOSD               {CPUID[3]}
+  MOV     EAX,EDX
+  STOSD               {CPUID[4]}
+  POP     EDI         {Restore registers}
+  POP     EBX
+end;
+
+//Date: 2017-08-08
+//Desc: CPU标识字符串
+function GetCPUIDStr: string;
+var nIdx: Integer;
+    nCPU: TCPUID;
+begin
+  try
+    for nIdx:=Low(nCPU) to High(nCPU) do
+      nCPU[nIdx] := -1;
+    //xxxxx
+    
+    nCPU := GetCPUID;
+    Result := Format('%.8x', [nCPU[1]]);
+  except
+    Result := 'unknown';
+  end;
+end;
+
 //Date: 2017-05-18
 //Parm: 配置文件;日期;是否初始化
 //Desc: 添加过期日期限制
@@ -969,6 +1015,14 @@ begin
   try
     if nInit then
     begin
+      nStr := ReadString('System', 'Local', '');
+      if nStr = '' then
+           nEn := 'N'
+      else nEn := 'Y';
+
+      WriteString('System', 'Unlock', nEn);
+      //has id,then unlock
+
       nStr := EncodeBase64(nDate);
       WriteString('System', 'Expire', nStr);
 
@@ -977,10 +1031,18 @@ begin
       WriteString('System', 'DateBase', nEn);
       WriteString('System', 'DateUpdate', nEn);
 
-      nStr := 'run_' + nStr;
+      nStr := 'run_' + nStr + ReadString('System', 'Unlock', '');
       WriteString('System', 'DateVerify', MD5Print(MD5String(nStr)));
     end else
     begin
+      nEn := ReadString('System', 'Local', '');
+      if nEn = '' then
+      begin
+        nEn := MD5Print(MD5String('id:' + GetCPUIDStr));
+        WriteString('System', 'Unlock', 'N');
+        WriteString('System', 'Local', nEn); 
+      end; //no id,add them
+
       nEn := ReadString('System', 'DateBase', '');
       nEn := DecodeBase64(nEn);
 
@@ -998,8 +1060,9 @@ begin
         nEn := EncodeBase64(nEn);
         WriteString('System', 'DateBase', nEn);
 
-        nStr := 'run_' + ReadString('System', 'Expire', '') + nEn;
-        WriteString('System', 'DateVerify', MD5Print(MD5String(nStr)));
+        nStr := ReadString('System', 'Expire', '') + nEn +
+                ReadString('System', 'Unlock', '');
+        WriteString('System', 'DateVerify', MD5Print(MD5String('run_' + nStr)));
 
         nEn := EncodeBase64(Date2Str(Now));
         WriteString('System', 'DateUpdate', nEn);
@@ -1014,18 +1077,26 @@ end;
 //Parm: 配置文件
 //Desc: 验证nFile文件配置的日期是否过期
 function IsSystemExpire(const nFile: string): Boolean;
-var nStr,nEn: string;
+var nStr,nEn,nLock: string;
 begin
   with TIniFile.Create(nFile) do
   try
     Result := True;
     AddExpireDate(nFile, '', False);
 
+    nStr := MD5Print(MD5String('id:' + GetCPUIDStr));
+    if nStr <> ReadString('System', 'Local', '') then Exit;
+    //id invalid
+
+    nLock := ReadString('System', 'Unlock', '');
+    if nLock <> 'Y' then Exit;
+    //unlock version
+
     nStr := ReadString('System', 'Expire', '');
     nEn := ReadString('System', 'DateBase', '');
 
     if ReadString('System', 'DateVerify', '') =
-       MD5Print(MD5String('run_' + nStr + nEn)) then
+       MD5Print(MD5String('run_' + nStr + nEn + nLock)) then
     begin
       nStr := DecodeBase64(nStr);
       nEn := DecodeBase64(nEn);

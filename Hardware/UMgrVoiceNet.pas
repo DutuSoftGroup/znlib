@@ -375,7 +375,8 @@ end;
 //Parm: 文本;语音卡标识;内容配置标识
 //Desc: 在nCard播发使用nContent参数处理的nText,写入缓冲等待处理
 procedure TNetVoiceManager.PlayVoice(const nText, nCard, nContent: string);
-var nData: PVoiceContentNormal;
+var nIdx: Integer;
+    nData: PVoiceContentNormal;
 begin
   if not Assigned(FVoicer) then
     raise Exception.Create('Voice Service Should Start First.');
@@ -386,6 +387,17 @@ begin
 
   FSyncLock.Enter;
   try
+    for nIdx:=FBuffer.Count-1 downto 0 do
+    begin
+      nData := FBuffer[nIdx];
+      if (nData.FCard = nCard) and
+         (nData.FContent = nContent) and (nData.FText = nText) then
+      begin
+        nData.FAddTime := GetTickCount;
+        Exit;
+      end; //合并相同内容
+    end;
+
     nData := gMemDataManager.LockData(FIDContent);
     FBuffer.Add(nData);
 

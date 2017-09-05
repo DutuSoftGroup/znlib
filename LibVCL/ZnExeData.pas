@@ -10,7 +10,7 @@ unit ZnExeData;
 interface
 
 uses
-  Windows, Classes, ComObj, ExtCtrls, Messages, SysUtils;
+  Windows, Classes, ComObj, ExtCtrls, Messages, SysUtils, SyncObjs;
 
 type
   TOnDataEvent = procedure (const nData: string) of object;
@@ -30,6 +30,8 @@ type
     //计数器
     FData: string;
     //待发送数据
+    FSyncLock: TCriticalSection;
+    //同步锁定
     FOnData: TOnDataEvent;
     FOnEnd: TNotifyEvent;
     FOnTimeout: TNotifyEvent;
@@ -39,6 +41,8 @@ type
     procedure WndProc(var nMsg: TMessage);
     procedure DoOnTimer(Sender: TObject);
     procedure SetMsgStr(const nStr: string);
+    function UseTimer(const nHasInstance: Boolean = True): Boolean;
+    //使用超时计数
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -77,6 +81,8 @@ const
 constructor TZnPostData.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FSyncLock := TCriticalSection.Create;
+
   FNum := 3;
   FMsgStr := CreateClassID;
   FHwnd := Classes.AllocateHWnd(WndProc);
@@ -86,6 +92,8 @@ destructor TZnPostData.Destroy;
 begin
   DeAllocateHwnd(FHwnd);
   if Assigned(FTimer) then FTimer.Free;
+
+  FSyncLock.Free;
   inherited;
 end;
 
@@ -109,20 +117,42 @@ begin
   end;
 end;
 
+//Date: 2017-07-31
+//Parm: 是否必须有实例
+//Desc: 判断是否使用超时计数
+function TZnPostData.UseTimer(const nHasInstance: Boolean): Boolean;
+begin
+  Result := GetCurrentThreadId = MainThreadID; 
+  if Result then
+    Result := (nHasInstance and Assigned(FTimer)) or
+              (not (nHasInstance or Assigned(FTimer)));
+  //主进程使用时,启用超时机制
+end;
+
 procedure TZnPostData.SendData(const nData: string);
 begin
-  if not Assigned(FTimer) then
+  if UseTimer(False) then
   begin
     FTimer := TTimer.Create(nil);
     FTimer.OnTimer := DoOnTimer;
   end;
 
-  FData := nData;
-  FNext := 0;
-  FTimer.Tag := 0;
+  FSyncLock.Enter;
+  try
+    FData := nData;
+    FNext := 0;
 
-  FTimer.Enabled := True;
-  PostMessage(HWND_BROADCAST, FMsgID, FHwnd, cSender);
+    if UseTimer then
+    begin
+      FTimer.Tag := 0;
+      FTimer.Enabled := True;
+    end;
+
+    PostMessage(HWND_BROADCAST, FMsgID, FHwnd, cSender);
+    //send share data
+  finally
+    FSyncLock.Leave;
+  end;
 end;
 
 procedure TZnPostData.WndProc(var nMsg: TMessage);
@@ -141,12 +171,18 @@ begin
 
   if (nMsg.Msg = FMsgID) and (nMsg.LParam = cReceiver) then
   begin
-    FTimer.Tag := -2;
+    if UseTimer then
+      FTimer.Tag := -2;
     FNext := nMsg.WParam;
 
-    nBuf.cbData := Length(FData);
-    nBuf.lpData := PChar(FData);
-    SendMessage(FNext, WM_COPYDATA, FHwnd, Cardinal(@nBuf));
+    FSyncLock.Enter;
+    try
+      nBuf.cbData := Length(FData);
+      nBuf.lpData := PChar(FData);
+      SendMessage(FNext, WM_COPYDATA, FHwnd, Cardinal(@nBuf));
+    finally
+      FSyncLock.Leave;
+    end;
     {------------------------ +Dmzn: 2007-01-24 --------------------
     备注: 发送方收到接收方句柄后,开始传递数据,同时开始发送超时的计数.
     高位参数WParam中放置发送端句柄,作为身份识别的标志
@@ -158,12 +194,17 @@ begin
     SendMessage(nMsg.WParam, FMsgID, FHwnd, cSendOK);
     //收到数据后发送回执
 
-    nBuf := TCopyDataStruct((Pointer(nMsg.LParam))^);
-    FData := StrPas(nBuf.lpData);
-    SetLength(FData, nBuf.cbData);
+    FSyncLock.Enter;
+    try
+      nBuf := TCopyDataStruct((Pointer(nMsg.LParam))^);
+      FData := StrPas(nBuf.lpData);
+      SetLength(FData, nBuf.cbData);
 
-    if Assigned(FOnData) then FOnData(FData);
-    if Assigned(FOnData2) then FOnData2(FData);
+      if Assigned(FOnData) then FOnData(FData);
+      if Assigned(FOnData2) then FOnData2(FData);
+    finally
+      FSyncLock.Leave;
+    end;
     {------------------------ +Dmzn: 2007-01-24 --------------------
     备注: 接收方收到数据,回执发送发并触发事件.
     高位参数WParam中放置发送端句柄,作为身份识别的标志
@@ -172,13 +213,13 @@ begin
 
   if (nMsg.Msg = FMsgID) and (nMsg.LParam = cSendOK) then
   begin
-    FTimer.Enabled := False;
+    if UseTimer then
+      FTimer.Enabled := False;
     if Assigned(FOnEnd) then FOnEnd(Self);
     {------------------------ +Dmzn: 2007-01-24 --------------------
     备注: 发送发收到回执,停掉超时计数
     ----------------------------------------------------------------}
   end;
 end;
-
 
 end.

@@ -24,12 +24,12 @@ const
   cProber_Query_All           = $00;       //查询全部
   cProber_Query_In            = $01;       //查询输入
   cProber_Query_Out           = $02;       //查询输出
-  cProber_Query_Interval      = 1200;      //查询间隔
+  cProber_Query_Interval      = 1600;      //查询间隔
 
   cProber_Len_Frame           = $14;       //普通帧长
   cProber_Len_FrameData       = 16;        //普通定长数据
   cProber_Len_485Data         = 100;       //485转发数据
-    
+
 type
   TProberIOAddress = array[0..7] of Byte;
   //in-out address
@@ -164,7 +164,9 @@ type
     FIDControl: Integer;
     FIDForward: Integer;
     //数据标识
-    FReaders: array[0..1] of TProberThread;
+    FMonitorCount: Integer;
+    FThreadCount: Integer;
+    FReaders: array of TProberThread;
     //连接对象
     FSyncLock: TCriticalSection;
     //同步锁定
@@ -360,6 +362,9 @@ end;
 constructor TProberManager.Create;
 begin
   FRetry := 2;
+  FThreadCount := 2;
+  FMonitorCount := 1;
+  
   FHosts := TList.Create;
   FCommand := TList.Create;
   FSyncLock := TCriticalSection.Create;
@@ -444,17 +449,22 @@ begin
   FHostIndex := 0;
   FHostActive := 0;
 
+  StopProber;
+  SetLength(FReaders, FThreadCount);
+  for nIdx:=Low(FReaders) to High(FReaders) do
+    FReaders[nIdx] := nil;
+  //xxxxx
+
   for nIdx:=Low(FReaders) to High(FReaders) do
   begin
     if nIdx >= nInt then Exit;
     //线程不超过启用主机数
 
-    if nIdx = 0 then
+    if nIdx < FMonitorCount then
          nType := ttAll
     else nType := ttActive;
 
-    if not Assigned(FReaders[nIdx]) then
-      FReaders[nIdx] := TProberThread.Create(Self, nType);
+    FReaders[nIdx] := TProberThread.Create(Self, nType);
     //xxxxx
   end;
 end;
@@ -522,10 +532,36 @@ begin
     nXML.LoadFromFile(nFile);
     //load config
 
+    nRoot := nXML.Root.FindNode('config');
+    if Assigned(nRoot) then
+    begin
+      nNode := nRoot.FindNode('thread');
+      if Assigned(nNode) then
+           FThreadCount := nNode.ValueAsInteger
+      else FThreadCount := 2;
+
+      if (FThreadCount < 1) or (FThreadCount > 5) then
+        raise Exception.Create('TruckProbe Reader Thread-Num Need Between 1-5.');
+      //xxxxx
+
+      nNode := nRoot.FindNode('monitor');
+      if Assigned(nNode) then
+           FMonitorCount := nNode.ValueAsInteger
+      else FMonitorCount := 1;
+
+      if (FMonitorCount < 1) or (FMonitorCount > FThreadCount) then
+        raise Exception.Create(Format(
+          'TruckProbe Reader Monitor-Num Need Between 1-%d.', [FThreadCount]));
+      //xxxxx
+    end;
+
     for nIdx:=0 to nXML.Root.NodeCount - 1 do
     begin
       nRoot := nXML.Root.Nodes[nIdx];
       //prober node
+
+      if CompareText(nRoot.Name, 'prober') <> 0 then Continue;
+      //not prober node
 
       New(nHost);
       FHosts.Add(nHost);
